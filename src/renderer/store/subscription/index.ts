@@ -13,6 +13,7 @@ import {
   getDueSubscriptions,
   getSubscriptionConfig,
   getSubscriptionCalibrationRecords,
+  getSubscriptionCalibrationRun,
   getSubscriptionDashboard,
   getSubscriptionDiskInfo,
   getSubscriptionHistory,
@@ -24,6 +25,7 @@ import {
   removeSubscription as removeSubscriptionRemote,
   requeueSubscriptionMusic as requeueSubscriptionMusicRemote,
   retrySubscriptionTasks,
+  resumeSubscriptionCalibration as resumeSubscriptionCalibrationRemote,
   scanSubscriptionCalibration,
   scanSubscriptionStructure,
   setSubscriptionSyncError,
@@ -51,6 +53,7 @@ export const subscriptionState = reactive<{
   cd2Health: LX.Subscription.Cd2Health | null
   cd2HealthError: string
   calibrationRecords: LX.Subscription.CalibrationRecord[]
+  calibrationRun: LX.Subscription.CalibrationRun | null
   structureRecords: LX.Subscription.StructureValidationRecord[]
   history: LX.Subscription.HistoryItem[]
   loading: boolean
@@ -64,6 +67,7 @@ export const subscriptionState = reactive<{
   cd2Health: null,
   cd2HealthError: '',
   calibrationRecords: [],
+  calibrationRun: null,
   structureRecords: [],
   history: [],
   loading: false,
@@ -78,12 +82,13 @@ const parseDuration = (interval?: string | null) => {
 }
 
 export const refreshSubscriptionState = async() => {
-  const [config, subscriptions, tasks, dashboard, calibrationRecords, structureRecords, history] = await Promise.all([
+  const [config, subscriptions, tasks, dashboard, calibrationRecords, calibrationRun, structureRecords, history] = await Promise.all([
     getSubscriptionConfig(),
     getSubscriptions(),
     getSubscriptionTasks(),
     getSubscriptionDashboard(),
     getSubscriptionCalibrationRecords(),
+    getSubscriptionCalibrationRun(),
     getSubscriptionStructureValidationRecords(),
     getSubscriptionHistory(),
   ])
@@ -92,6 +97,7 @@ export const refreshSubscriptionState = async() => {
   subscriptionState.tasks = tasks
   subscriptionState.dashboard = dashboard
   subscriptionState.calibrationRecords = calibrationRecords
+  subscriptionState.calibrationRun = calibrationRun
   subscriptionState.structureRecords = structureRecords
   subscriptionState.history = history
 }
@@ -153,6 +159,19 @@ export const testSubscriptionCd2 = async() => {
 
 export const runSubscriptionCalibration = async(input: LX.Subscription.CalibrationScanInput) => {
   const summary = await scanSubscriptionCalibration(input)
+  await refreshSubscriptionState()
+  await reconcileSubscriptionDownloads()
+  void processSubscriptionQueue()
+  return summary
+}
+
+export const refreshSubscriptionCalibrationRun = async() => {
+  subscriptionState.calibrationRun = await getSubscriptionCalibrationRun()
+  return subscriptionState.calibrationRun
+}
+
+export const resumeSubscriptionCalibrationRun = async() => {
+  const summary = await resumeSubscriptionCalibrationRemote()
   await refreshSubscriptionState()
   await reconcileSubscriptionDownloads()
   void processSubscriptionQueue()
@@ -269,13 +288,14 @@ export const unlockDiskQueue = async() => {
 }
 
 let queueRunning = false
+const isCalibrationActive = () => ['collecting', 'running'].includes(subscriptionState.calibrationRun?.status ?? '')
 export const processSubscriptionQueue = async() => {
   if (queueRunning) return
   queueRunning = true
   try {
     await refreshSubscriptionState()
     if (!subscriptionState.config || subscriptionState.config.diskLocked) return
-    if (subscriptionState.config.syncToCd2 && subscriptionState.config.calibrationCompletedAt == null) return
+    if (subscriptionState.config.syncToCd2 && (subscriptionState.config.calibrationCompletedAt == null || isCalibrationActive())) return
     const activeDownloadTaskIds = new Set(downloadList
       .filter(item => !item.isComplate)
       .map(item => item.metadata.subscriptionTaskId)
@@ -515,7 +535,8 @@ const runDueSubscriptionBackup = async() => {
   }
 }
 
-const reconcileSubscriptionDownloads = async(canResume = !subscriptionState.config?.syncToCd2 || subscriptionState.config.calibrationCompletedAt != null) => {
+const reconcileSubscriptionDownloads = async(canResume = !subscriptionState.config?.syncToCd2 ||
+  (subscriptionState.config.calibrationCompletedAt != null && !isCalibrationActive())) => {
   const transientStatuses: LX.Subscription.TaskStatus[] = ['resolving', 'downloading', 'downloaded']
   const downloadByTaskId = new Map(downloadList
     .filter(item => item.metadata.subscriptionTaskId)
@@ -546,7 +567,13 @@ const reconcileSubscriptionDownloads = async(canResume = !subscriptionState.conf
 export const initSubscriptionService = async() => {
   await getDownloadList()
   await refreshSubscriptionState()
-  const canResumeSubscriptionDownloads = !subscriptionState.config?.syncToCd2 || subscriptionState.config.calibrationCompletedAt != null
+  if (['collecting', 'running'].includes(subscriptionState.calibrationRun?.status ?? '')) {
+    void resumeSubscriptionCalibrationRun().catch(err => {
+      console.error('Subscription calibration resume failed:', err)
+    })
+  }
+  const canResumeSubscriptionDownloads = !subscriptionState.config?.syncToCd2 ||
+    (subscriptionState.config.calibrationCompletedAt != null && !isCalibrationActive())
   await reconcileSubscriptionDownloads(canResumeSubscriptionDownloads)
   const resumableDownloads = downloadList.filter(item => {
     if (!item.metadata.subscriptionTaskId || item.isComplate || !canResumeSubscriptionDownloads) return false

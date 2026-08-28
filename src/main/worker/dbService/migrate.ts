@@ -226,6 +226,14 @@ const migrateV10 = (db: Database.Database) => {
   })()
 }
 
+const migrateV11 = (db: Database.Database) => {
+  db.exec([
+    tables.get('subscription_calibration_run')!,
+    tables.get('subscription_calibration_run_file')!,
+    tables.get('index_subscription_calibration_run_file_state')!,
+  ].join('\n'))
+}
+
 export default (db: Database.Database) => {
   // PRAGMA user_version = x
   // console.log(db.prepare('PRAGMA user_version').get().user_version)
@@ -242,6 +250,7 @@ export default (db: Database.Database) => {
       migrateV8(db)
       migrateV9(db)
       migrateV10(db)
+      migrateV11(db)
       db.prepare('UPDATE "main"."db_info" SET "field_value"=@value WHERE "field_name"=@name').run({ name: 'version', value: DB_VERSION })
       break
     case '2':
@@ -253,6 +262,7 @@ export default (db: Database.Database) => {
       migrateV8(db)
       migrateV9(db)
       migrateV10(db)
+      migrateV11(db)
       db.prepare('UPDATE "main"."db_info" SET "field_value"=@value WHERE "field_name"=@name').run({ name: 'version', value: DB_VERSION })
       break
     case '3':
@@ -264,6 +274,7 @@ export default (db: Database.Database) => {
       migrateV8(db)
       migrateV9(db)
       migrateV10(db)
+      migrateV11(db)
       db.prepare('UPDATE "main"."db_info" SET "field_value"=@value WHERE "field_name"=@name').run({ name: 'version', value: DB_VERSION })
       break
     case '4':
@@ -274,6 +285,7 @@ export default (db: Database.Database) => {
       migrateV8(db)
       migrateV9(db)
       migrateV10(db)
+      migrateV11(db)
       db.prepare('UPDATE "main"."db_info" SET "field_value"=@value WHERE "field_name"=@name').run({ name: 'version', value: DB_VERSION })
       break
     case '5':
@@ -283,6 +295,7 @@ export default (db: Database.Database) => {
       migrateV8(db)
       migrateV9(db)
       migrateV10(db)
+      migrateV11(db)
       db.prepare('UPDATE "main"."db_info" SET "field_value"=@value WHERE "field_name"=@name').run({ name: 'version', value: DB_VERSION })
       break
     case '6':
@@ -291,6 +304,7 @@ export default (db: Database.Database) => {
       migrateV8(db)
       migrateV9(db)
       migrateV10(db)
+      migrateV11(db)
       db.prepare('UPDATE "main"."db_info" SET "field_value"=@value WHERE "field_name"=@name').run({ name: 'version', value: DB_VERSION })
       break
     case '7':
@@ -298,21 +312,29 @@ export default (db: Database.Database) => {
       migrateV8(db)
       migrateV9(db)
       migrateV10(db)
+      migrateV11(db)
       db.prepare('UPDATE "main"."db_info" SET "field_value"=@value WHERE "field_name"=@name').run({ name: 'version', value: DB_VERSION })
       break
     case '8':
       migrateV8(db)
       migrateV9(db)
       migrateV10(db)
+      migrateV11(db)
       db.prepare('UPDATE "main"."db_info" SET "field_value"=@value WHERE "field_name"=@name').run({ name: 'version', value: DB_VERSION })
       break
     case '9':
       migrateV9(db)
       migrateV10(db)
+      migrateV11(db)
       db.prepare('UPDATE "main"."db_info" SET "field_value"=@value WHERE "field_name"=@name').run({ name: 'version', value: DB_VERSION })
       break
     case '10':
       migrateV10(db)
+      migrateV11(db)
+      db.prepare('UPDATE "main"."db_info" SET "field_value"=@value WHERE "field_name"=@name').run({ name: 'version', value: DB_VERSION })
+      break
+    case '11':
+      migrateV11(db)
       db.prepare('UPDATE "main"."db_info" SET "field_value"=@value WHERE "field_name"=@name').run({ name: 'version', value: DB_VERSION })
       break
   }

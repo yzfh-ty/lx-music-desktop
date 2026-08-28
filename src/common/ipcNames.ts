@@ -176,6 +176,8 @@ const modules = {
     subscription_cd2_remove_old: 'subscription_cd2_remove_old',
     subscription_cd2_health: 'subscription_cd2_health',
     subscription_calibration_scan: 'subscription_calibration_scan',
+    subscription_calibration_run_get: 'subscription_calibration_run_get',
+    subscription_calibration_resume: 'subscription_calibration_resume',
     subscription_calibration_get: 'subscription_calibration_get',
     subscription_calibration_confirm: 'subscription_calibration_confirm',
     subscription_structure_scan: 'subscription_structure_scan',

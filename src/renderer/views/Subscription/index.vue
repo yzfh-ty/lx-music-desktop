@@ -195,6 +195,14 @@
           </div>
           <div :class="$style.settingsActions">
             <base-btn :disabled="busy" @click="handleCalibration">开始只读校准</base-btn>
+            <base-btn v-if="state.calibrationRun?.status == 'failed'" outline :disabled="busy" @click="handleCalibrationResume">继续上次校准</base-btn>
+          </div>
+          <div v-if="state.calibrationRun" :class="$style.progressCard" role="status" aria-live="polite">
+            <div><span>{{ calibrationRunStatusText(state.calibrationRun.status) }}</span><b>{{ state.calibrationRun.completed }} / {{ state.calibrationRun.total }}</b></div>
+            <progress :max="Math.max(1, state.calibrationRun.total)" :value="state.calibrationRun.completed" />
+            <small v-if="state.calibrationRun.currentFile">当前：{{ state.calibrationRun.currentFile }}</small>
+            <small v-if="state.calibrationRun.error" :class="$style.rowError">{{ state.calibrationRun.error }}</small>
+            <small v-if="state.calibrationRun.status == 'completed'">匹配 {{ state.calibrationRun.matched }}，待确认 {{ state.calibrationRun.unresolved }}，失败 {{ state.calibrationRun.failed }}</small>
           </div>
           <p v-if="state.config?.calibrationCompletedAt">最近完成：{{ formatTime(state.config?.calibrationCompletedAt) }}</p>
         </div>
@@ -297,10 +305,12 @@ import {
   ignoreTaskMetadataAndUpload,
   pauseTask,
   refreshSubscriptionRuntimeStatus,
+  refreshSubscriptionCalibrationRun,
   refreshSubscriptionState,
   requeueSubscriptionHistoryMusic,
   removeSubscription,
   resolveSubscriptionCalibration,
+  resumeSubscriptionCalibrationRun,
   resumeTask,
   retryTasks,
   runSubscriptionBackup,
@@ -576,12 +586,22 @@ const handleTestCd2 = async() => run(async() => {
 }, 'CD2 连接与挂载检查通过')
 const handleBackup = async() => run(runSubscriptionBackup, result => `数据库已备份到 ${result.path}`)
 const parsePathList = (value: string) => value.split(/[,，\n]/).map(item => item.trim()).filter(Boolean)
-const handleCalibration = async() => run(async() => runSubscriptionCalibration({
+const runCalibrationWithProgress = async(action: () => Promise<LX.Subscription.CalibrationSummary>) => {
+  const timer = setInterval(() => { void refreshSubscriptionCalibrationRun() }, 700)
+  try {
+    await run(action, result => `校准完成：扫描 ${result.scanned}，自动匹配 ${result.matched}，待人工确认 ${result.unresolved}，读取失败 ${result.failed}`)
+  } finally {
+    clearInterval(timer)
+    await refreshSubscriptionCalibrationRun()
+  }
+}
+const handleCalibration = async() => runCalibrationWithProgress(async() => runSubscriptionCalibration({
   rootPath: calibration.rootPath,
   recursive: calibration.recursive,
   includePaths: parsePathList(calibration.includePaths),
   excludePaths: parsePathList(calibration.excludePaths),
-}), result => `校准完成：扫描 ${result.scanned}，自动匹配 ${result.matched}，待人工确认 ${result.unresolved}，读取失败 ${result.failed}`)
+}))
+const handleCalibrationResume = async() => runCalibrationWithProgress(resumeSubscriptionCalibrationRun)
 const handleCalibrationConfirm = async(record: LX.Subscription.CalibrationRecord, musicKey: string) => run(
   async() => resolveSubscriptionCalibration({ recordId: record.id, musicKey: musicKey.trim() }),
   '校准关联已人工确认',
@@ -632,6 +652,12 @@ const historyQualityText = (item: LX.Subscription.HistoryItem) => {
 }
 const formatDuration = (duration?: number | null) => duration == null ? '时长未知' : `${Math.floor(duration / 60)}:${String(Math.round(duration % 60)).padStart(2, '0')}`
 const calibrationStatusText = (status: LX.Subscription.CalibrationRecord['status']) => ({ matched: '已匹配', unresolved: '待人工确认', failed: '读取失败' }[status])
+const calibrationRunStatusText = (status: LX.Subscription.CalibrationRun['status']) => ({
+  collecting: '正在枚举校准文件',
+  running: '正在读取音频并校准',
+  failed: '校准已中断，可继续',
+  completed: '校准已完成',
+}[status])
 const canPause = (task: LX.Subscription.Task) => ['pending', 'downloading'].includes(task.status)
 const canIgnoreMetadata = (task: LX.Subscription.Task) => task.failureReason?.includes('格式不支持内嵌') == true
 const queuePosition = (task: LX.Subscription.Task) => {
@@ -663,7 +689,10 @@ const taskStatusText = (task: LX.Subscription.Task) => task.status == 'disk_paus
 
 let clockTimer: ReturnType<typeof setInterval> | null = null
 onMounted(() => {
-  clockTimer = setInterval(() => { currentTime.value = Date.now() }, 1_000)
+  clockTimer = setInterval(() => {
+    currentTime.value = Date.now()
+    if (['collecting', 'running'].includes(state.calibrationRun?.status ?? '')) void refreshSubscriptionCalibrationRun()
+  }, 1_000)
   void Promise.all([refreshSubscriptionState(), refreshSubscriptionRuntimeStatus()]).catch(err => {
     notice.value = err instanceof Error ? err.message : String(err)
     noticeError.value = true
@@ -705,5 +734,6 @@ onBeforeUnmount(() => {
 .settings { max-width: 760px; display: flex; flex-direction: column; gap: 14px; label { display: grid; grid-template-columns: 190px 1fr; align-items: center; gap: 12px; > span { color: var(--color-font-label); } > :global(ul) { padding: 0; gap: 16px; } } > p { color: var(--color-font-label); font-size: 12px; } }
 .settingsActions { display: flex; gap: 10px; padding-left: 202px; }
 .calibrationGrid { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; label { display: grid; grid-template-columns: 120px 1fr; align-items: center; gap: 12px; > span { color: var(--color-font-label); } } }
+.progressCard { margin-top: 12px; padding: 10px 12px; border-radius: 6px; background: var(--color-primary-alpha-100); display: flex; flex-direction: column; gap: 7px; > div { display: flex; justify-content: space-between; gap: 12px; } progress { width: 100%; accent-color: var(--color-primary); } small { overflow-wrap: anywhere; color: var(--color-font-label); } }
 @media (max-width: 900px) { .cards { grid-template-columns: repeat(3, 1fr); } .formRow, .editRow, .filterBar { grid-template-columns: 1fr 1fr; } }
 </style>

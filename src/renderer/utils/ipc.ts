@@ -924,6 +924,12 @@ export const checkSubscriptionCd2Health = async(): Promise<LX.Subscription.Cd2He
 export const scanSubscriptionCalibration = async(input: LX.Subscription.CalibrationScanInput): Promise<LX.Subscription.CalibrationSummary> => {
   return rendererInvoke<LX.Subscription.CalibrationScanInput, LX.Subscription.CalibrationSummary>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_calibration_scan, input)
 }
+export const getSubscriptionCalibrationRun = async(): Promise<LX.Subscription.CalibrationRun | null> => {
+  return rendererInvoke<LX.Subscription.CalibrationRun | null>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_calibration_run_get)
+}
+export const resumeSubscriptionCalibration = async(): Promise<LX.Subscription.CalibrationSummary> => {
+  return rendererInvoke<LX.Subscription.CalibrationSummary>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_calibration_resume)
+}
 export const getSubscriptionCalibrationRecords = async(): Promise<LX.Subscription.CalibrationRecord[]> => {
   return rendererInvoke<LX.Subscription.CalibrationRecord[]>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_calibration_get)
 }

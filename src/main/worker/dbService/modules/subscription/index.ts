@@ -101,6 +101,34 @@ interface CalibrationRow {
   confirmed_at: number | null
 }
 
+interface CalibrationRunRow {
+  status: LX.Subscription.CalibrationRun['status']
+  root_path: string
+  recursive: number
+  include_paths: string
+  exclude_paths: string
+  total: number
+  completed: number
+  current_file: string
+  matched: number
+  unresolved: number
+  failed: number
+  error: string | null
+  started_at: number
+  updated_at: number
+}
+
+interface CalibrationRunFileRow {
+  file_path: string
+  position: number
+  state: 'pending' | 'completed'
+  title: string
+  artist: string
+  duration: number | null
+  quality: LX.Subscription.Quality | null
+  error: string | null
+}
+
 const toSubscription = (row: SubscriptionRow): LX.Subscription.ListItem => ({
   id: row.id,
   source: row.source,
@@ -384,6 +412,135 @@ const toCalibrationRecord = (row: CalibrationRow): LX.Subscription.CalibrationRe
   scannedAt: row.scanned_at,
   confirmedAt: row.confirmed_at,
 })
+
+const toCalibrationRun = (row: CalibrationRunRow): LX.Subscription.CalibrationRun => ({
+  status: row.status,
+  input: {
+    rootPath: row.root_path,
+    recursive: row.recursive == 1,
+    includePaths: JSON.parse(row.include_paths) as string[],
+    excludePaths: JSON.parse(row.exclude_paths) as string[],
+  },
+  total: row.total,
+  completed: row.completed,
+  currentFile: row.current_file,
+  matched: row.matched,
+  unresolved: row.unresolved,
+  failed: row.failed,
+  error: row.error,
+  startedAt: row.started_at,
+  updatedAt: row.updated_at,
+})
+
+export const getSubscriptionCalibrationRun = (): LX.Subscription.CalibrationRun | null => {
+  const row = getDB().prepare('SELECT * FROM subscription_calibration_run WHERE id = 1').get() as CalibrationRunRow | undefined
+  return row ? toCalibrationRun(row) : null
+}
+
+export const beginSubscriptionCalibrationRun = (input: LX.Subscription.CalibrationScanInput): LX.Subscription.CalibrationRun => {
+  const now = Date.now()
+  const db = getDB()
+  db.transaction(() => {
+    db.prepare('DELETE FROM subscription_calibration_run_file').run()
+    db.prepare(`
+      INSERT INTO subscription_calibration_run (
+        id, status, root_path, recursive, include_paths, exclude_paths,
+        total, completed, current_file, matched, unresolved, failed,
+        error, started_at, updated_at
+      ) VALUES (1, 'collecting', ?, ?, ?, ?, 0, 0, '', 0, 0, 0, NULL, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        status = excluded.status, root_path = excluded.root_path,
+        recursive = excluded.recursive, include_paths = excluded.include_paths,
+        exclude_paths = excluded.exclude_paths, total = 0, completed = 0,
+        current_file = '', matched = 0, unresolved = 0, failed = 0,
+        error = NULL, started_at = excluded.started_at, updated_at = excluded.updated_at
+    `).run(input.rootPath, input.recursive ? 1 : 0, JSON.stringify(input.includePaths), JSON.stringify(input.excludePaths), now, now)
+  })()
+  return getSubscriptionCalibrationRun()!
+}
+
+export const prepareSubscriptionCalibrationFiles = (files: string[]): LX.Subscription.CalibrationRun => {
+  const db = getDB()
+  const now = Date.now()
+  db.transaction(() => {
+    db.prepare('DELETE FROM subscription_calibration_run_file').run()
+    const insert = db.prepare(`
+      INSERT INTO subscription_calibration_run_file (file_path, position, state)
+      VALUES (?, ?, 'pending')
+    `)
+    files.forEach((filePath, index) => insert.run(filePath, index))
+    db.prepare(`
+      UPDATE subscription_calibration_run SET status = 'running', total = ?,
+        completed = 0, current_file = '', error = NULL, updated_at = ? WHERE id = 1
+    `).run(files.length, now)
+  })()
+  return getSubscriptionCalibrationRun()!
+}
+
+export const getPendingSubscriptionCalibrationFiles = (): string[] => {
+  return getDB().prepare(`
+    SELECT file_path FROM subscription_calibration_run_file
+    WHERE state = 'pending' ORDER BY position
+  `).pluck().all() as string[]
+}
+
+export const saveSubscriptionCalibrationFile = (file: LX.Subscription.CalibrationFile): LX.Subscription.CalibrationRun => {
+  const db = getDB()
+  const now = Date.now()
+  db.transaction(() => {
+    db.prepare(`
+      UPDATE subscription_calibration_run_file SET state = 'completed', title = ?,
+        artist = ?, duration = ?, quality = ?, error = ? WHERE file_path = ?
+    `).run(file.title, file.artist, file.duration, file.quality, file.error, file.filePath)
+    const completed = Number(db.prepare("SELECT COUNT(*) FROM subscription_calibration_run_file WHERE state = 'completed'").pluck().get())
+    db.prepare(`
+      UPDATE subscription_calibration_run SET status = 'running', completed = ?,
+        current_file = ?, error = NULL, updated_at = ? WHERE id = 1
+    `).run(completed, file.filePath, now)
+  })()
+  return getSubscriptionCalibrationRun()!
+}
+
+export const getSubscriptionCalibrationRunFiles = (): LX.Subscription.CalibrationFile[] => {
+  const rows = getDB().prepare(`
+    SELECT * FROM subscription_calibration_run_file ORDER BY position
+  `).all() as CalibrationRunFileRow[]
+  return rows.filter(row => row.state == 'completed').map(row => ({
+    filePath: row.file_path,
+    title: row.title,
+    artist: row.artist,
+    duration: row.duration,
+    quality: row.quality,
+    error: row.error,
+  }))
+}
+
+export const completeSubscriptionCalibrationRun = (summary: LX.Subscription.CalibrationSummary): LX.Subscription.CalibrationRun => {
+  const now = Date.now()
+  getDB().prepare(`
+    UPDATE subscription_calibration_run SET status = 'completed', completed = total,
+      current_file = '', matched = ?, unresolved = ?, failed = ?,
+      error = NULL, updated_at = ? WHERE id = 1
+  `).run(summary.matched, summary.unresolved, summary.failed, now)
+  return getSubscriptionCalibrationRun()!
+}
+
+export const failSubscriptionCalibrationRun = (message: string): LX.Subscription.CalibrationRun => {
+  getDB().prepare(`
+    UPDATE subscription_calibration_run SET status = 'failed', error = ?, updated_at = ? WHERE id = 1
+  `).run(message, Date.now())
+  return getSubscriptionCalibrationRun()!
+}
+
+export const resumeSubscriptionCalibrationRun = (): LX.Subscription.CalibrationRun => {
+  const run = getSubscriptionCalibrationRun()
+  if (!run) throw new Error('没有可恢复的校准任务')
+  getDB().prepare(`
+    UPDATE subscription_calibration_run SET status = CASE WHEN total > 0 THEN 'running' ELSE 'collecting' END,
+      error = NULL, updated_at = ? WHERE id = 1
+  `).run(Date.now())
+  return getSubscriptionCalibrationRun()!
+}
 
 const applyCalibrationMatch = (
   musicKey: string,

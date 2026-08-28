@@ -251,6 +251,20 @@ declare namespace LX {
       failed: number
     }
 
+    interface CalibrationRun {
+      status: 'collecting' | 'running' | 'failed' | 'completed'
+      input: CalibrationScanInput
+      total: number
+      completed: number
+      currentFile: string
+      matched: number
+      unresolved: number
+      failed: number
+      error: string | null
+      startedAt: number
+      updatedAt: number
+    }
+
     interface CalibrationConfirmInput {
       recordId: number
       musicKey: string

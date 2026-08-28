@@ -125,6 +125,9 @@ type Tables = 'db_info'
 | 'index_subscription_history_music_key'
 | 'subscription_calibration'
 | 'index_subscription_calibration_status'
+| 'subscription_calibration_run'
+| 'subscription_calibration_run_file'
+| 'index_subscription_calibration_run_file_state'
 | 'subscription_structure_issue'
 | 'index_subscription_structure_issue_kind'
 
@@ -410,6 +413,46 @@ tables.set('index_subscription_calibration_status', `
     "scanned_at"
   );
 `)
+tables.set('subscription_calibration_run', `
+  CREATE TABLE "subscription_calibration_run" (
+    "id" INTEGER NOT NULL DEFAULT 1,
+    "status" TEXT NOT NULL,
+    "root_path" TEXT NOT NULL,
+    "recursive" INTEGER NOT NULL,
+    "include_paths" TEXT NOT NULL DEFAULT '[]',
+    "exclude_paths" TEXT NOT NULL DEFAULT '[]',
+    "total" INTEGER NOT NULL DEFAULT 0,
+    "completed" INTEGER NOT NULL DEFAULT 0,
+    "current_file" TEXT NOT NULL DEFAULT '',
+    "matched" INTEGER NOT NULL DEFAULT 0,
+    "unresolved" INTEGER NOT NULL DEFAULT 0,
+    "failed" INTEGER NOT NULL DEFAULT 0,
+    "error" TEXT,
+    "started_at" INTEGER NOT NULL,
+    "updated_at" INTEGER NOT NULL,
+    PRIMARY KEY("id"),
+    CHECK("id" = 1)
+  );
+`)
+tables.set('subscription_calibration_run_file', `
+  CREATE TABLE "subscription_calibration_run_file" (
+    "file_path" TEXT NOT NULL,
+    "position" INTEGER NOT NULL,
+    "state" TEXT NOT NULL DEFAULT 'pending',
+    "title" TEXT NOT NULL DEFAULT '',
+    "artist" TEXT NOT NULL DEFAULT '',
+    "duration" REAL,
+    "quality" TEXT,
+    "error" TEXT,
+    PRIMARY KEY("file_path")
+  );
+`)
+tables.set('index_subscription_calibration_run_file_state', `
+  CREATE INDEX "index_subscription_calibration_run_file_state" ON "subscription_calibration_run_file" (
+    "state",
+    "position"
+  );
+`)
 tables.set('subscription_structure_issue', `
   CREATE TABLE "subscription_structure_issue" (
     "id" INTEGER NOT NULL UNIQUE,
@@ -430,4 +473,4 @@ tables.set('index_subscription_structure_issue_kind', `
 
 export default tables
 
-export const DB_VERSION = '11'
+export const DB_VERSION = '12'

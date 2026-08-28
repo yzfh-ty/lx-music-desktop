@@ -53,10 +53,10 @@ const collectAudioFiles = async(rootPath: string, recursive: boolean, excludes: 
   return files
 }
 
-export const scanSubscriptionCalibration = async(
+export const collectSubscriptionCalibrationFiles = async(
   config: LX.Subscription.Config,
   input: LX.Subscription.CalibrationScanInput,
-): Promise<LX.Subscription.CalibrationFile[]> => {
+): Promise<string[]> => {
   await checkSubscriptionCd2Health(config)
   const rootPath = path.resolve(input.rootPath.trim() || config.cd2RootPath)
   if (!isWithin(config.cd2RootPath, rootPath)) throw new Error('校准根目录必须位于 CD2 音乐库根目录内')
@@ -71,29 +71,39 @@ export const scanSubscriptionCalibration = async(
     if (!stat?.isDirectory()) throw new Error(`包含目录不存在：${scanRoot}`)
     for (const filePath of await collectAudioFiles(scanRoot, input.recursive, excludes)) fileSet.add(filePath)
   }
+  return Array.from(fileSet)
+}
 
-  const results: LX.Subscription.CalibrationFile[] = []
-  for (const filePath of fileSet) {
-    try {
-      const metadata = await parseFile(filePath, { duration: true, skipCovers: true })
-      results.push({
-        filePath,
-        title: metadata.common.title?.trim() ?? '',
-        artist: metadata.common.artist?.trim() ?? metadata.common.artists?.join(' / ').trim() ?? '',
-        duration: metadata.format.duration ?? null,
-        quality: inspectQuality(metadata.format),
-        error: null,
-      })
-    } catch (err) {
-      results.push({
-        filePath,
-        title: '',
-        artist: '',
-        duration: null,
-        quality: null,
-        error: err instanceof Error ? err.message : String(err),
-      })
+export const inspectSubscriptionCalibrationFile = async(filePath: string): Promise<LX.Subscription.CalibrationFile> => {
+  try {
+    const metadata = await parseFile(filePath, { duration: true, skipCovers: true })
+    return {
+      filePath,
+      title: metadata.common.title?.trim() ?? '',
+      artist: metadata.common.artist?.trim() ?? metadata.common.artists?.join(' / ').trim() ?? '',
+      duration: metadata.format.duration ?? null,
+      quality: inspectQuality(metadata.format),
+      error: null,
     }
+  } catch (err) {
+    return {
+      filePath,
+      title: '',
+      artist: '',
+      duration: null,
+      quality: null,
+      error: err instanceof Error ? err.message : String(err),
+    }
+  }
+}
+
+export const scanSubscriptionCalibration = async(
+  config: LX.Subscription.Config,
+  input: LX.Subscription.CalibrationScanInput,
+): Promise<LX.Subscription.CalibrationFile[]> => {
+  const results: LX.Subscription.CalibrationFile[] = []
+  for (const filePath of await collectSubscriptionCalibrationFiles(config, input)) {
+    results.push(await inspectSubscriptionCalibrationFile(filePath))
   }
   return results
 }
