@@ -72,6 +72,8 @@ const createTask = async(downloadInfo: LX.Download.ListItem, savePath: string, s
   if (!tasks.has(downloadInfo.id)) return
 
   if (downloadInfo.downloaded == 0) {
+    // 全新任务不续传遗留的 .part 临时文件，避免混入旧内容
+    await removeFile(joinPath(savePath, downloadInfo.metadata.fileName + '.part')).catch(() => {})
     if (skipExistFile) {
       const stats = await getFileStats(downloadInfo.metadata.filePath)
       if (stats && stats.size > 100) {
