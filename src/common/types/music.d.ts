@@ -114,6 +114,16 @@ declare namespace LX {
       url: string
     }
 
+    interface MusicUrlDetail {
+      url: string
+      type: LX.Quality
+      sourceReportedQuality: LX.Subscription.Quality | null
+      bitrate: number | null
+      codec: string | null
+      sampleRate: number | null
+      bitDepth: number | null
+    }
+
     interface MusicInfoOtherSourceSave {
       id: string
       list: MusicInfoOnline[]

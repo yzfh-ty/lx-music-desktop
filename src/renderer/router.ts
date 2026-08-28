@@ -62,6 +62,14 @@ const router = createRouter({
         name: 'Setting',
       },
     },
+    {
+      path: '/subscription',
+      name: 'Subscription',
+      component: require('./views/Subscription/index.vue').default,
+      meta: {
+        name: 'Subscription',
+      },
+    },
     { path: '/:pathMatch(.*)*', redirect: '/search' },
   ],
   linkActiveClass: 'active-link',

@@ -166,6 +166,8 @@
     "webpack-merge": "^6.0.1"
   },
   "dependencies": {
+    "@grpc/grpc-js": "^1.14.4",
+    "@grpc/proto-loader": "^0.8.1",
     "@simonwep/pickr": "^1.9.1",
     "better-sqlite3": "^12.9.0",
     "bufferutil": "^4.1.0",

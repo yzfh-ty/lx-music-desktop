@@ -62,6 +62,22 @@ export const getMusicUrl = async({ musicInfo, quality, isRefresh, allowToggleSou
   })
 }
 
+export const getMusicUrlDetail = async({ musicInfo, quality, allowToggleSource = true, onToggleSource = () => {} }: {
+  musicInfo: LX.Music.MusicInfoOnline
+  quality: LX.Quality
+  allowToggleSource?: boolean
+  onToggleSource?: (musicInfo?: LX.Music.MusicInfoOnline) => void
+}): Promise<{ detail: LX.Music.MusicUrlDetail, musicInfo: LX.Music.MusicInfoOnline }> => {
+  const result = await handleGetOnlineMusicUrl({
+    musicInfo,
+    quality,
+    onToggleSource,
+    isRefresh: true,
+    allowToggleSource,
+  })
+  return { detail: result.detail, musicInfo: result.musicInfo }
+}
+
 export const getPicUrl = async({ musicInfo, listId, isRefresh, allowToggleSource = true, onToggleSource = () => {} }: {
   musicInfo: LX.Music.MusicInfoOnline
   listId?: string | null

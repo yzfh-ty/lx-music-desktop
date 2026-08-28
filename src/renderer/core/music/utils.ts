@@ -245,6 +245,7 @@ export const getOnlineOtherSourceMusicUrl = async({ musicInfos, quality, onToggl
   musicInfo: LX.Music.MusicInfoOnline
   quality: LX.Quality
   isFromCache: boolean
+  detail: LX.Music.MusicUrlDetail
 }> => {
   if (!await window.lx.apiInitPromise[0]) throw new Error('source init failed')
 
@@ -265,7 +266,23 @@ export const getOnlineOtherSourceMusicUrl = async({ musicInfos, quality, onToggl
   if (!musicInfo || !itemQuality) throw new Error(window.i18n.t('toggle_source_failed'))
 
   const cachedUrl = await getStoreMusicUrl(musicInfo, itemQuality)
-  if (cachedUrl && !isRefresh) return { url: cachedUrl, musicInfo, quality: itemQuality, isFromCache: true }
+  if (cachedUrl && !isRefresh) {
+    return {
+      url: cachedUrl,
+      musicInfo,
+      quality: itemQuality,
+      isFromCache: true,
+      detail: {
+        url: cachedUrl,
+        type: itemQuality,
+        sourceReportedQuality: null,
+        bitrate: null,
+        codec: null,
+        sampleRate: null,
+        bitDepth: null,
+      },
+    }
+  }
 
   let reqPromise
   try {
@@ -275,8 +292,8 @@ export const getOnlineOtherSourceMusicUrl = async({ musicInfos, quality, onToggl
   }
   // retryedSource.includes(musicInfo.source)
   // eslint-disable-next-line @typescript-eslint/promise-function-async
-  return reqPromise.then(({ url, type }: { url: string, type: LX.Quality }) => {
-    return { musicInfo, url, quality: type, isFromCache: false }
+  return reqPromise.then((detail: LX.Music.MusicUrlDetail) => {
+    return { musicInfo, url: detail.url, quality: detail.type, isFromCache: false, detail }
     // eslint-disable-next-line @typescript-eslint/promise-function-async
   }).catch((err: any) => {
     if (err.message == requestMsg.tooManyRequests) throw err
@@ -299,6 +316,7 @@ export const handleGetOnlineMusicUrl = async({ musicInfo, quality, onToggleSourc
   musicInfo: LX.Music.MusicInfoOnline
   quality: LX.Quality
   isFromCache: boolean
+  detail: LX.Music.MusicUrlDetail
 }> => {
   if (!await window.lx.apiInitPromise[0]) throw new Error('source init failed')
   // console.log(musicInfo.source)
@@ -310,8 +328,8 @@ export const handleGetOnlineMusicUrl = async({ musicInfo, quality, onToggleSourc
   } catch (err: any) {
     reqPromise = Promise.reject(err)
   }
-  return reqPromise.then(({ url, type }: { url: string, type: LX.Quality }) => {
-    return { musicInfo, url, quality: type, isFromCache: false }
+  return reqPromise.then((detail: LX.Music.MusicUrlDetail) => {
+    return { musicInfo, url: detail.url, quality: detail.type, isFromCache: false, detail }
   }).catch(async(err: any) => {
     console.log(err)
     if (!allowToggleSource || err.message == requestMsg.tooManyRequests) throw err

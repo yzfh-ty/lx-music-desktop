@@ -12,21 +12,22 @@ const handleWriteMeta = (meta, filePath) => {
     }
     delete meta.lyrics
   }
-  NodeID3.write(meta, filePath)
+  const result = NodeID3.write(meta, filePath)
+  if (result instanceof Error) throw result
 }
 
 module.exports = (filePath, meta, proxy) => {
-  if (!meta.APIC) return handleWriteMeta(meta, filePath)
+  if (!meta.APIC) return Promise.resolve().then(() => handleWriteMeta(meta, filePath))
   if (!/^http/.test(meta.APIC)) {
     delete meta.APIC
-    return handleWriteMeta(meta, filePath)
+    return Promise.resolve().then(() => handleWriteMeta(meta, filePath))
   }
   let ext = path.extname(meta.APIC)
   let picPath = filePath.replace(/\.mp3$/, '') + (ext ? ext.replace(extReg, '$1') : '.jpg')
 
   let picUrl = meta.APIC
   if (picUrl.includes('music.126.net')) picUrl += `${picUrl.includes('?') ? '&' : '?'}param=500y500`
-  download(picUrl, picPath, proxy).then(success => {
+  return download(picUrl, picPath, proxy).then(success => {
     if (success) {
       meta.APIC = picPath
       handleWriteMeta(meta, filePath)

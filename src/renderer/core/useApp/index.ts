@@ -15,6 +15,7 @@ import usePlayer from './usePlayer'
 import useSettingSync from './useSettingSync'
 import { useRouter } from '@common/utils/vueRouter'
 import handleListAutoUpdate from './listAutoUpdate'
+import { initSubscriptionService } from '@renderer/store/subscription'
 
 
 export default () => {
@@ -71,6 +72,7 @@ export default () => {
       sendInited()
 
       handleListAutoUpdate()
+      void initSubscriptionService().catch(err => { console.error('Subscription service init failed:', err) })
       if (window.lx.isProd && appSetting['common.isAgreePact']) checkUpdate()
     })
   })

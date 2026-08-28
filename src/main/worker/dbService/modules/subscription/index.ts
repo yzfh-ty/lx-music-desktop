@@ -1,0 +1,727 @@
+import { randomUUID } from 'node:crypto'
+import { getDB } from '../../db'
+
+const QUALITY_RANK: Record<LX.Subscription.Quality, number> = {
+  '128k': 1,
+  '320k': 2,
+  flac: 3,
+  flac24bit: 4,
+}
+
+interface SubscriptionRow {
+  id: string
+  source: LX.OnlineSource
+  list_type: LX.Subscription.ListType
+  list_id: string
+  name: string
+  interval_minutes: number | null
+  enabled: number
+  last_sync_at: number | null
+  next_sync_at: number | null
+  last_error: string | null
+  created_at: number
+  updated_at: number
+}
+
+interface ConfigRow {
+  stop_quality: LX.Subscription.StopQuality
+  cd2_root_path: string
+  cd2_grpc_url: string
+  cd2_api_token: string
+  sync_to_cd2: number
+  disk_threshold_bytes: number
+  disk_locked: number
+  disk_paused_at: number | null
+  calibration_root_path: string
+  calibration_recursive: number
+  calibration_include_paths: string
+  calibration_exclude_paths: string
+  calibration_completed_at: number | null
+  created_at: number
+  updated_at: number
+}
+
+interface TaskRow {
+  id: string
+  music_key: string
+  subscription_id: string | null
+  source: LX.OnlineSource
+  song_id: string
+  name: string
+  singer: string
+  album_name: string
+  duration: number | null
+  music_info: string
+  cloud_quality: LX.Subscription.Quality | null
+  library_cloud_path: string | null
+  status: LX.Subscription.TaskStatus
+  requested_quality: LX.Subscription.Quality | null
+  source_reported_quality: LX.Subscription.Quality | null
+  file_verified_quality: LX.Subscription.Quality | null
+  source_used: string | null
+  actual_source: string | null
+  actual_song_id: string | null
+  local_path: string | null
+  task_cloud_path: string | null
+  old_cloud_path: string | null
+  file_name_format: string | null
+  upload_started_at: number | null
+  progress: number
+  speed: string
+  failure_reason: string | null
+  retry_count: number
+  cleanup_at: number | null
+  discovered_at: number
+  download_completed_at: number | null
+  upload_completed_at: number | null
+  created_at: number
+  updated_at: number
+}
+
+interface CalibrationRow {
+  id: number
+  file_path: string
+  title: string
+  artist: string
+  duration: number | null
+  quality: LX.Subscription.Quality | null
+  status: 'matched' | 'unresolved' | 'failed'
+  candidate_music_keys: string
+  error: string | null
+  scanned_at: number
+  confirmed_at: number | null
+}
+
+const toSubscription = (row: SubscriptionRow): LX.Subscription.ListItem => ({
+  id: row.id,
+  source: row.source,
+  listType: row.list_type,
+  listId: row.list_id,
+  name: row.name,
+  intervalMinutes: row.interval_minutes,
+  enabled: row.enabled == 1,
+  lastSyncAt: row.last_sync_at,
+  nextSyncAt: row.next_sync_at,
+  lastError: row.last_error,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+})
+
+const toConfig = (row: ConfigRow): LX.Subscription.Config => ({
+  stopQuality: row.stop_quality,
+  cd2RootPath: row.cd2_root_path,
+  cd2GrpcUrl: row.cd2_grpc_url,
+  cd2ApiToken: row.cd2_api_token,
+  syncToCd2: row.sync_to_cd2 == 1,
+  diskThresholdBytes: row.disk_threshold_bytes,
+  diskLocked: row.disk_locked == 1,
+  diskPausedAt: row.disk_paused_at,
+  calibrationRootPath: row.calibration_root_path,
+  calibrationRecursive: row.calibration_recursive == 1,
+  calibrationIncludePaths: JSON.parse(row.calibration_include_paths) as string[],
+  calibrationExcludePaths: JSON.parse(row.calibration_exclude_paths) as string[],
+  calibrationCompletedAt: row.calibration_completed_at,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+})
+
+const toTask = (row: TaskRow): LX.Subscription.Task => ({
+  id: row.id,
+  musicKey: row.music_key,
+  subscriptionId: row.subscription_id,
+  source: row.source,
+  songId: row.song_id,
+  name: row.name,
+  singer: row.singer,
+  albumName: row.album_name,
+  duration: row.duration,
+  status: row.status,
+  requestedQuality: row.requested_quality,
+  sourceReportedQuality: row.source_reported_quality,
+  fileVerifiedQuality: row.file_verified_quality,
+  cloudQuality: row.cloud_quality,
+  sourceUsed: row.source_used,
+  actualSource: row.actual_source,
+  actualSongId: row.actual_song_id,
+  localPath: row.local_path,
+  existingCloudPath: row.library_cloud_path,
+  cloudPath: row.task_cloud_path,
+  oldCloudPath: row.old_cloud_path,
+  fileNameFormat: row.file_name_format,
+  uploadStartedAt: row.upload_started_at,
+  progress: row.progress,
+  speed: row.speed,
+  failureReason: row.failure_reason,
+  retryCount: row.retry_count,
+  cleanupAt: row.cleanup_at,
+  discoveredAt: row.discovered_at,
+  downloadCompletedAt: row.download_completed_at,
+  uploadCompletedAt: row.upload_completed_at,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+  musicInfo: JSON.parse(row.music_info) as LX.Music.MusicInfoOnline,
+})
+
+const taskSelect = `
+  SELECT t.*, l.source, l.song_id, l.name, l.singer, l.album_name, l.duration,
+    l.music_info, l.cloud_quality, l.cloud_path AS library_cloud_path,
+    t.cloud_path AS task_cloud_path
+  FROM subscription_task t
+  JOIN subscription_library l ON l.music_key = t.music_key
+`
+
+const getConfigRow = (): ConfigRow => {
+  const db = getDB()
+  let row = db.prepare('SELECT * FROM subscription_config WHERE id = 1').get() as ConfigRow | undefined
+  if (!row) {
+    const now = Date.now()
+    db.prepare('INSERT INTO subscription_config (id, created_at, updated_at) VALUES (1, ?, ?)').run(now, now)
+    row = db.prepare('SELECT * FROM subscription_config WHERE id = 1').get() as ConfigRow
+  }
+  return row
+}
+
+export const getSubscriptionConfig = (): LX.Subscription.Config => toConfig(getConfigRow())
+
+export const updateSubscriptionConfig = (input: LX.Subscription.ConfigUpdate): LX.Subscription.Config => {
+  const current = getSubscriptionConfig()
+  const next = { ...current, ...input, updatedAt: Date.now() }
+  getDB().prepare(`
+    UPDATE subscription_config SET
+      stop_quality = @stopQuality,
+      cd2_root_path = @cd2RootPath,
+      cd2_grpc_url = @cd2GrpcUrl,
+      cd2_api_token = @cd2ApiToken,
+      sync_to_cd2 = @syncToCd2,
+      disk_threshold_bytes = @diskThresholdBytes,
+      disk_locked = @diskLocked,
+      disk_paused_at = @diskPausedAt,
+      calibration_root_path = @calibrationRootPath,
+      calibration_recursive = @calibrationRecursive,
+      calibration_include_paths = @calibrationIncludePaths,
+      calibration_exclude_paths = @calibrationExcludePaths,
+      calibration_completed_at = @calibrationCompletedAt,
+      updated_at = @updatedAt
+    WHERE id = 1
+  `).run({
+    ...next,
+    syncToCd2: next.syncToCd2 ? 1 : 0,
+    diskLocked: next.diskLocked ? 1 : 0,
+    calibrationRecursive: next.calibrationRecursive ? 1 : 0,
+    calibrationIncludePaths: JSON.stringify(next.calibrationIncludePaths),
+    calibrationExcludePaths: JSON.stringify(next.calibrationExcludePaths),
+  })
+  return getSubscriptionConfig()
+}
+
+export const getSubscriptions = (): LX.Subscription.ListItem[] => {
+  return (getDB().prepare('SELECT * FROM subscription_list ORDER BY created_at DESC').all() as SubscriptionRow[]).map(toSubscription)
+}
+
+export const getDueSubscriptions = (now: number): LX.Subscription.ListItem[] => {
+  return (getDB().prepare(`
+    SELECT * FROM subscription_list
+    WHERE enabled = 1 AND interval_minutes IS NOT NULL AND next_sync_at IS NOT NULL AND next_sync_at <= ?
+    ORDER BY next_sync_at ASC
+  `).all(now) as SubscriptionRow[]).map(toSubscription)
+}
+
+export const createSubscription = (input: LX.Subscription.ListCreate): LX.Subscription.ListItem => {
+  const source = input.source.trim() as LX.OnlineSource
+  const listType = input.listType == 'board' ? 'board' : 'playlist'
+  const listId = input.listId.trim()
+  const name = input.name.trim()
+  if (!source || !listId || !name) throw new Error('订阅平台、歌单 ID 和名称不能为空')
+  if (input.intervalMinutes != null && (!Number.isInteger(input.intervalMinutes) || input.intervalMinutes <= 0)) {
+    throw new Error('同步周期必须是正整数分钟')
+  }
+  const now = Date.now()
+  const item: LX.Subscription.ListItem = {
+    id: randomUUID(),
+    source,
+    listType,
+    listId,
+    name,
+    intervalMinutes: input.intervalMinutes,
+    enabled: true,
+    lastSyncAt: null,
+    nextSyncAt: input.intervalMinutes == null ? null : now + input.intervalMinutes * 60_000,
+    lastError: null,
+    createdAt: now,
+    updatedAt: now,
+  }
+  try {
+    getDB().prepare(`
+      INSERT INTO subscription_list (
+        id, source, list_type, list_id, name, interval_minutes, enabled,
+        last_sync_at, next_sync_at, last_error, created_at, updated_at
+      ) VALUES (
+        @id, @source, @listType, @listId, @name, @intervalMinutes, @enabled,
+        @lastSyncAt, @nextSyncAt, @lastError, @createdAt, @updatedAt
+      )
+    `).run({ ...item, enabled: 1 })
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('UNIQUE')) throw new Error('该歌单已订阅')
+    throw err
+  }
+  return item
+}
+
+export const updateSubscription = (input: LX.Subscription.ListUpdate): LX.Subscription.ListItem => {
+  const row = getDB().prepare('SELECT * FROM subscription_list WHERE id = ?').get(input.id) as SubscriptionRow | undefined
+  if (!row) throw new Error('订阅不存在')
+  const current = toSubscription(row)
+  const now = Date.now()
+  const next = { ...current, ...input, updatedAt: now }
+  if (next.intervalMinutes != null && (!Number.isInteger(next.intervalMinutes) || next.intervalMinutes <= 0)) {
+    throw new Error('同步周期必须是正整数分钟')
+  }
+  if ('intervalMinutes' in input || ('enabled' in input && input.enabled)) {
+    next.nextSyncAt = next.enabled && next.intervalMinutes != null ? now + next.intervalMinutes * 60_000 : null
+  } else if ('enabled' in input && !input.enabled) {
+    next.nextSyncAt = null
+  }
+  getDB().prepare(`
+    UPDATE subscription_list SET
+      name = @name, interval_minutes = @intervalMinutes, enabled = @enabled,
+      last_sync_at = @lastSyncAt, next_sync_at = @nextSyncAt,
+      last_error = @lastError, updated_at = @updatedAt
+    WHERE id = @id
+  `).run({ ...next, enabled: next.enabled ? 1 : 0 })
+  return next
+}
+
+export const removeSubscription = (id: string): void => {
+  const db = getDB()
+  db.transaction(() => {
+    db.prepare('DELETE FROM subscription_music WHERE subscription_id = ?').run(id)
+    db.prepare('DELETE FROM subscription_list WHERE id = ?').run(id)
+  })()
+}
+
+const isSatisfied = (quality: LX.Subscription.Quality | null, stopQuality: LX.Subscription.StopQuality) => {
+  return quality != null && stopQuality != 'none' && QUALITY_RANK[quality] >= QUALITY_RANK[stopQuality]
+}
+
+const normalizeCalibrationText = (value: string) => value.normalize('NFKC').toLowerCase().replace(/[\p{P}\p{S}\s]+/gu, '')
+
+const toCalibrationRecord = (row: CalibrationRow): LX.Subscription.CalibrationRecord => ({
+  id: row.id,
+  filePath: row.file_path,
+  title: row.title,
+  artist: row.artist,
+  duration: row.duration,
+  quality: row.quality,
+  status: row.status,
+  candidateMusicKeys: JSON.parse(row.candidate_music_keys) as string[],
+  error: row.error,
+  scannedAt: row.scanned_at,
+  confirmedAt: row.confirmed_at,
+})
+
+const applyCalibrationMatch = (
+  musicKey: string,
+  file: LX.Subscription.CalibrationFile,
+  confirmedAt: number,
+) => {
+  if (!file.quality) throw new Error('校准文件音质不可比较')
+  const db = getDB()
+  const config = getSubscriptionConfig()
+  db.prepare(`
+    UPDATE subscription_library SET cloud_quality = ?, cloud_path = ?,
+      upload_confirmed_at = ?, record_origin = 'calibrated', calibration_status = 'matched',
+      calibrated_at = ?, quality_satisfied = ?, updated_at = ?
+    WHERE music_key = ?
+  `).run(file.quality, file.filePath, confirmedAt, confirmedAt,
+    isSatisfied(file.quality, config.stopQuality) ? 1 : 0, confirmedAt, musicKey)
+  db.prepare(`
+    UPDATE subscription_task SET status = 'uploaded', cloud_path = ?, old_cloud_path = NULL,
+      local_path = NULL, file_verified_quality = ?, failure_reason = NULL,
+      cleanup_at = NULL, upload_completed_at = ?, progress = 100, speed = '', updated_at = ?
+    WHERE music_key = ? AND status IN ('discovered', 'pending', 'disk_paused', 'failed', 'quality_skipped', 'uploaded')
+  `).run(file.filePath, file.quality, confirmedAt, confirmedAt, musicKey)
+}
+
+export const importSubscriptionCalibration = (files: LX.Subscription.CalibrationFile[]): LX.Subscription.CalibrationSummary => {
+  const db = getDB()
+  const scannedAt = Date.now()
+  const library = db.prepare('SELECT music_key, name, singer, duration FROM subscription_library').all() as Array<{
+    music_key: string
+    name: string
+    singer: string
+    duration: number | null
+  }>
+  const prepared = files.map(file => {
+    const title = normalizeCalibrationText(file.title)
+    const artist = normalizeCalibrationText(file.artist)
+    const candidates = file.error != null || !title || !artist || file.duration == null
+      ? []
+      : library.filter(item => item.duration != null &&
+        normalizeCalibrationText(item.name) == title &&
+        normalizeCalibrationText(item.singer) == artist &&
+        Math.abs(item.duration - file.duration!) <= 3)
+        .map(item => item.music_key)
+    return { file, candidates }
+  })
+  const uniqueKeyCount = new Map<string, number>()
+  for (const item of prepared) {
+    if (!item.file.error && item.file.quality && item.candidates.length == 1) {
+      uniqueKeyCount.set(item.candidates[0], (uniqueKeyCount.get(item.candidates[0]) ?? 0) + 1)
+    }
+  }
+  const summary: LX.Subscription.CalibrationSummary = { scanned: files.length, matched: 0, unresolved: 0, failed: 0 }
+  const upsert = db.prepare(`
+    INSERT INTO subscription_calibration (
+      file_path, title, artist, duration, quality, status,
+      candidate_music_keys, error, scanned_at, confirmed_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(file_path) DO UPDATE SET
+      title = excluded.title, artist = excluded.artist, duration = excluded.duration,
+      quality = excluded.quality, status = excluded.status,
+      candidate_music_keys = excluded.candidate_music_keys, error = excluded.error,
+      scanned_at = excluded.scanned_at, confirmed_at = excluded.confirmed_at
+  `)
+  db.transaction(() => {
+    for (const { file, candidates } of prepared) {
+      let status: CalibrationRow['status']
+      let error = file.error
+      if (file.error) {
+        status = 'failed'
+        summary.failed++
+      } else if (!file.quality) {
+        status = 'unresolved'
+        error = '无法识别可比较的音质'
+        summary.unresolved++
+      } else if (!file.title || !file.artist || file.duration == null) {
+        status = 'unresolved'
+        error = '缺少歌名、歌手或时长标签'
+        summary.unresolved++
+      } else if (candidates.length != 1 || uniqueKeyCount.get(candidates[0]) != 1) {
+        status = 'unresolved'
+        error = candidates.length > 1 || (candidates.length == 1 && uniqueKeyCount.get(candidates[0]) != 1)
+          ? '匹配到多个候选或同一歌曲对应多个文件'
+          : '未找到可唯一关联的订阅歌曲'
+        summary.unresolved++
+      } else {
+        status = 'matched'
+        error = null
+        applyCalibrationMatch(candidates[0], file, scannedAt)
+        summary.matched++
+      }
+      upsert.run(file.filePath, file.title, file.artist, file.duration, file.quality,
+        status, JSON.stringify(candidates), error, scannedAt, status == 'matched' ? scannedAt : null)
+    }
+    db.prepare('UPDATE subscription_config SET calibration_completed_at = ?, updated_at = ? WHERE id = 1').run(scannedAt, scannedAt)
+  })()
+  return summary
+}
+
+export const getSubscriptionCalibrationRecords = (): LX.Subscription.CalibrationRecord[] => {
+  return (getDB().prepare(`
+    SELECT * FROM subscription_calibration
+    ORDER BY CASE status WHEN 'unresolved' THEN 0 WHEN 'failed' THEN 1 ELSE 2 END, scanned_at DESC
+  `).all() as CalibrationRow[]).map(toCalibrationRecord)
+}
+
+export const confirmSubscriptionCalibration = (input: LX.Subscription.CalibrationConfirmInput): LX.Subscription.CalibrationRecord => {
+  const db = getDB()
+  const row = db.prepare('SELECT * FROM subscription_calibration WHERE id = ?').get(input.recordId) as CalibrationRow | undefined
+  if (!row) throw new Error('校准记录不存在')
+  if (!db.prepare('SELECT 1 FROM subscription_library WHERE music_key = ?').get(input.musicKey)) throw new Error('目标订阅歌曲不存在')
+  const record = toCalibrationRecord(row)
+  const confirmedAt = Date.now()
+  db.transaction(() => {
+    applyCalibrationMatch(input.musicKey, record, confirmedAt)
+    db.prepare(`
+      UPDATE subscription_calibration SET status = 'matched', candidate_music_keys = ?,
+        error = NULL, confirmed_at = ? WHERE id = ?
+    `).run(JSON.stringify([input.musicKey]), confirmedAt, input.recordId)
+  })()
+  return getSubscriptionCalibrationRecords().find(item => item.id == input.recordId)!
+}
+
+export const ingestSubscriptionSync = (input: LX.Subscription.SyncInput): LX.Subscription.SyncResult => {
+  const db = getDB()
+  const subscription = db.prepare('SELECT * FROM subscription_list WHERE id = ?').get(input.subscriptionId) as SubscriptionRow | undefined
+  if (!subscription) throw new Error('订阅不存在')
+  const config = getSubscriptionConfig()
+  const result: LX.Subscription.SyncResult = { discovered: 0, queued: 0, skipped: 0, total: input.tracks.length }
+
+  db.transaction(() => {
+    const findLibrary = db.prepare('SELECT cloud_quality, cloud_path, calibration_status FROM subscription_library WHERE music_key = ?')
+    const insertLibrary = db.prepare(`
+      INSERT INTO subscription_library (
+        music_key, source, song_id, name, singer, album_name, duration,
+        music_info, created_at, updated_at
+      ) VALUES (
+        @musicKey, @source, @songId, @name, @singer, @albumName, @duration,
+        @musicInfo, @createdAt, @updatedAt
+      )
+    `)
+    const updateLibraryInfo = db.prepare(`
+      UPDATE subscription_library SET
+        name = @name, singer = @singer, album_name = @albumName,
+        duration = @duration, music_info = @musicInfo, updated_at = @updatedAt
+      WHERE music_key = @musicKey
+    `)
+    const saveRelation = db.prepare(`
+      INSERT INTO subscription_music (subscription_id, music_key, first_seen_at, last_seen_at)
+      VALUES (@subscriptionId, @musicKey, @now, @now)
+      ON CONFLICT(subscription_id, music_key) DO UPDATE SET last_seen_at = excluded.last_seen_at
+    `)
+    const findTask = db.prepare('SELECT status FROM subscription_task WHERE music_key = ?')
+    const insertTask = db.prepare(`
+      INSERT INTO subscription_task (
+        id, music_key, subscription_id, status, discovered_at, created_at, updated_at
+      ) VALUES (@id, @musicKey, @subscriptionId, @status, @now, @now, @now)
+    `)
+    const resetUploadedTask = db.prepare(`
+      UPDATE subscription_task SET subscription_id = @subscriptionId, status = 'pending',
+        requested_quality = NULL, source_reported_quality = NULL, file_verified_quality = NULL,
+        source_used = NULL, actual_source = NULL, actual_song_id = NULL,
+        local_path = NULL, cloud_path = NULL, old_cloud_path = NULL,
+        file_name_format = NULL, upload_started_at = NULL,
+        progress = 0, speed = '', failure_reason = NULL, cleanup_at = NULL,
+        download_completed_at = NULL, upload_completed_at = NULL, updated_at = @now
+      WHERE music_key = @musicKey
+    `)
+    const history = db.prepare(`
+      INSERT INTO subscription_history (task_id, music_key, status, message, created_at)
+      VALUES (?, ?, ?, ?, ?)
+    `)
+
+    const seen = new Set<string>()
+    for (const track of input.tracks) {
+      const musicKey = `${track.source}:${track.id}`
+      if (seen.has(musicKey)) continue
+      seen.add(musicKey)
+      const payload = {
+        musicKey,
+        source: track.source,
+        songId: track.id,
+        name: track.name,
+        singer: track.singer,
+        albumName: track.albumName ?? '',
+        duration: track.duration ?? null,
+        musicInfo: JSON.stringify(track.musicInfo),
+        createdAt: input.syncedAt,
+        updatedAt: input.syncedAt,
+      }
+      let library = findLibrary.get(musicKey) as { cloud_quality: LX.Subscription.Quality | null, cloud_path: string | null, calibration_status: string | null } | undefined
+      if (!library) {
+        insertLibrary.run(payload)
+        library = { cloud_quality: null, cloud_path: null, calibration_status: null }
+        result.discovered++
+      } else {
+        updateLibraryInfo.run(payload)
+      }
+      saveRelation.run({ subscriptionId: input.subscriptionId, musicKey, now: input.syncedAt })
+
+      const task = findTask.get(musicKey) as { status: LX.Subscription.TaskStatus } | undefined
+      const hasUnknownCloudQuality = library.cloud_path != null && (library.cloud_quality == null || library.calibration_status == 'calibration_unresolved')
+      if (hasUnknownCloudQuality || isSatisfied(library.cloud_quality, config.stopQuality) || task?.status == 'failed') {
+        result.skipped++
+        continue
+      }
+      if (!task) {
+        const taskId = randomUUID()
+        insertTask.run({ id: taskId, musicKey, subscriptionId: input.subscriptionId, status: 'pending', now: input.syncedAt })
+        history.run(taskId, musicKey, 'pending', '歌单同步发现歌曲', input.syncedAt)
+        result.queued++
+      } else if (task.status == 'uploaded') {
+        resetUploadedTask.run({ musicKey, subscriptionId: input.subscriptionId, now: input.syncedAt })
+        history.run(db.prepare('SELECT id FROM subscription_task WHERE music_key = ?').pluck().get(musicKey), musicKey, 'pending', '发现潜在音质升级', input.syncedAt)
+        result.queued++
+      } else {
+        result.skipped++
+      }
+    }
+
+    const interval = subscription.interval_minutes
+    db.prepare(`
+      UPDATE subscription_list SET name = COALESCE(?, name), last_sync_at = ?,
+        next_sync_at = ?, last_error = NULL, updated_at = ? WHERE id = ?
+    `).run(input.subscriptionName?.trim() ?? null, input.syncedAt, interval == null ? null : input.syncedAt + interval * 60_000, input.syncedAt, input.subscriptionId)
+  })()
+  return result
+}
+
+export const setSubscriptionSyncError = (id: string, message: string): void => {
+  const now = Date.now()
+  getDB().prepare(`
+    UPDATE subscription_list SET last_error = ?,
+      next_sync_at = CASE WHEN interval_minutes IS NULL THEN NULL ELSE ? + interval_minutes * 60000 END,
+      updated_at = ? WHERE id = ?
+  `).run(message, now, now, id)
+}
+
+export const getSubscriptionTasks = (status?: LX.Subscription.TaskStatus): LX.Subscription.Task[] => {
+  const rows = status
+    ? getDB().prepare(`${taskSelect} WHERE t.status = ? ORDER BY t.updated_at DESC`).all(status)
+    : getDB().prepare(`${taskSelect} ORDER BY t.updated_at DESC`).all()
+  return (rows as TaskRow[]).map(toTask)
+}
+
+export const updateSubscriptionTask = (input: LX.Subscription.TaskUpdate): LX.Subscription.Task => {
+  const currentRow = getDB().prepare(`${taskSelect} WHERE t.id = ?`).get(input.id) as TaskRow | undefined
+  if (!currentRow) throw new Error('任务不存在')
+  const current = toTask(currentRow)
+  const next = { ...current, ...input, updatedAt: Date.now() }
+  if (next.status == 'uploading' && !getSubscriptionConfig().syncToCd2) {
+    next.status = 'local_completed'
+    next.progress = 100
+    next.speed = ''
+    next.cleanupAt = null
+    next.uploadCompletedAt = null
+    next.uploadStartedAt = null
+    next.failureReason = null
+  }
+  getDB().transaction(() => {
+    getDB().prepare(`
+      UPDATE subscription_task SET
+        subscription_id = @subscriptionId, status = @status,
+        requested_quality = @requestedQuality, source_reported_quality = @sourceReportedQuality,
+        file_verified_quality = @fileVerifiedQuality, source_used = @sourceUsed,
+        actual_source = @actualSource, actual_song_id = @actualSongId,
+        local_path = @localPath, cloud_path = @cloudPath, old_cloud_path = @oldCloudPath,
+        file_name_format = @fileNameFormat, upload_started_at = @uploadStartedAt,
+        progress = @progress, speed = @speed, failure_reason = @failureReason,
+        retry_count = @retryCount, cleanup_at = @cleanupAt,
+        download_completed_at = @downloadCompletedAt, upload_completed_at = @uploadCompletedAt,
+        updated_at = @updatedAt
+      WHERE id = @id
+    `).run(next)
+    if (next.status != current.status || next.failureReason != current.failureReason) {
+      getDB().prepare(`
+        INSERT INTO subscription_history (task_id, music_key, status, message, snapshot, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(next.id, next.musicKey, next.status,
+        next.status == 'local_completed' ? 'CD2 同步已关闭，任务仅保留本地成品' : next.failureReason,
+        JSON.stringify({
+          requestedQuality: next.requestedQuality,
+          sourceReportedQuality: next.sourceReportedQuality,
+          fileVerifiedQuality: next.fileVerifiedQuality,
+          cloudQuality: next.cloudQuality,
+          cloudPath: next.cloudPath,
+        }), next.updatedAt)
+    }
+  })()
+  return getSubscriptionTasks().find(task => task.id == input.id)!
+}
+
+export const retrySubscriptionTasks = (ids: string[]): number => {
+  const db = getDB()
+  const now = Date.now()
+  let count = 0
+  db.transaction(() => {
+    const update = db.prepare(`
+      UPDATE subscription_task SET status = CASE
+          WHEN upload_completed_at IS NOT NULL AND old_cloud_path IS NOT NULL THEN 'old_version_cleanup'
+          WHEN local_path IS NOT NULL AND file_verified_quality IS NOT NULL AND cloud_path IS NOT NULL THEN 'uploading'
+          WHEN local_path IS NOT NULL AND file_verified_quality IS NOT NULL THEN 'tagging'
+          WHEN local_path IS NOT NULL THEN 'quality_check'
+          ELSE 'pending'
+        END, failure_reason = NULL,
+        progress = 0, speed = '', retry_count = retry_count + 1, updated_at = ?
+      WHERE id = ? AND status = 'failed'
+    `)
+    const find = db.prepare('SELECT music_key, status FROM subscription_task WHERE id = ?')
+    const history = db.prepare(`
+      INSERT INTO subscription_history (task_id, music_key, status, message, created_at)
+      VALUES (?, ?, ?, '用户手动重试', ?)
+    `)
+    for (const id of ids) {
+      const result = update.run(now, id)
+      if (!result.changes) continue
+      const task = find.get(id) as { music_key: string, status: LX.Subscription.TaskStatus }
+      history.run(id, task.music_key, task.status, now)
+      count++
+    }
+  })()
+  return count
+}
+
+export const confirmSubscriptionUpload = (input: {
+  taskId: string
+  cloudPath: string
+  cloudQuality: LX.Subscription.Quality
+  fileNameFormat: string
+  confirmedAt: number
+  cleanupAt: number
+}): LX.Subscription.Task => {
+  const db = getDB()
+  const row = db.prepare('SELECT music_key FROM subscription_task WHERE id = ?').get(input.taskId) as { music_key: string } | undefined
+  if (!row) throw new Error('任务不存在')
+  const config = getSubscriptionConfig()
+  const task = db.prepare('SELECT old_cloud_path FROM subscription_task WHERE id = ?').get(input.taskId) as { old_cloud_path: string | null }
+  const nextStatus: LX.Subscription.TaskStatus = task.old_cloud_path ? 'old_version_cleanup' : 'cleanup_wait'
+  db.transaction(() => {
+    db.prepare(`
+      UPDATE subscription_library SET cloud_quality = ?, cloud_path = ?, file_name_format = ?,
+        upload_confirmed_at = ?, record_origin = 'uploaded', quality_satisfied = ?, updated_at = ?
+      WHERE music_key = ?
+    `).run(input.cloudQuality, input.cloudPath, input.fileNameFormat, input.confirmedAt,
+      isSatisfied(input.cloudQuality, config.stopQuality) ? 1 : 0, input.confirmedAt, row.music_key)
+    db.prepare(`
+      UPDATE subscription_task SET status = ?, cloud_path = ?,
+        file_verified_quality = ?, upload_completed_at = ?, cleanup_at = ?,
+        progress = 100, failure_reason = NULL, updated_at = ? WHERE id = ?
+    `).run(nextStatus, input.cloudPath, input.cloudQuality, input.confirmedAt, input.cleanupAt, input.confirmedAt, input.taskId)
+    db.prepare(`
+      INSERT INTO subscription_history (task_id, music_key, status, message, created_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(input.taskId, row.music_key, nextStatus,
+      nextStatus == 'old_version_cleanup' ? 'CD2 已确认新版本上传成功，等待清理旧扩展名版本' : 'CD2 已确认上传成功',
+      input.confirmedAt)
+  })()
+  return getSubscriptionTasks().find(task => task.id == input.taskId)!
+}
+
+export const getSubscriptionDashboard = (): LX.Subscription.Dashboard => {
+  const db = getDB()
+  const count = (sql: string, ...params: unknown[]) => Number(db.prepare(sql).pluck().get(...params) ?? 0)
+  const config = getSubscriptionConfig()
+  return {
+    subscriptionCount: count('SELECT COUNT(*) FROM subscription_list'),
+    pendingCount: count("SELECT COUNT(*) FROM subscription_task WHERE status IN ('discovered', 'pending', 'disk_paused', 'resolving')"),
+    downloadingCount: count("SELECT COUNT(*) FROM subscription_task WHERE status IN ('downloading', 'downloaded', 'quality_check', 'tagging')"),
+    uploadingCount: count("SELECT COUNT(*) FROM subscription_task WHERE status IN ('uploading', 'old_version_cleanup')"),
+    failedCount: count("SELECT COUNT(*) FROM subscription_task WHERE status = 'failed'"),
+    cleanupCount: count("SELECT COUNT(*) FROM subscription_task WHERE status = 'cleanup_wait'"),
+    libraryCount: count('SELECT COUNT(*) FROM subscription_library'),
+    lastSyncAt: (db.prepare('SELECT MAX(last_sync_at) FROM subscription_list').pluck().get() as number | null) ?? null,
+    diskLocked: config.diskLocked,
+  }
+}
+
+export const getSubscriptionHistory = (limit = 500): LX.Subscription.HistoryItem[] => {
+  const safeLimit = Math.max(1, Math.min(2_000, Math.trunc(limit)))
+  const rows = getDB().prepare(`
+    SELECT h.*, l.name, l.singer
+    FROM subscription_history h
+    JOIN subscription_library l ON l.music_key = h.music_key
+    ORDER BY h.created_at DESC, h.id DESC
+    LIMIT ?
+  `).all(safeLimit) as Array<{
+    id: number
+    task_id: string
+    music_key: string
+    name: string
+    singer: string
+    status: LX.Subscription.TaskStatus
+    message: string | null
+    snapshot: string | null
+    created_at: number
+  }>
+  return rows.map(row => ({
+    id: row.id,
+    taskId: row.task_id,
+    musicKey: row.music_key,
+    name: row.name,
+    singer: row.singer,
+    status: row.status,
+    message: row.message,
+    snapshot: row.snapshot ? JSON.parse(row.snapshot) as Record<string, unknown> : null,
+    createdAt: row.created_at,
+  }))
+}

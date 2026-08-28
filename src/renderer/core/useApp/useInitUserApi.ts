@@ -57,7 +57,15 @@ export default () => {
                       // eslint-disable-next-line @typescript-eslint/promise-function-async
                     }).then(res => {
                       // console.log(res)
-                      return { type, url: res.data.url }
+                      return {
+                        type,
+                        url: res.data.url,
+                        sourceReportedQuality: res.data.quality ?? null,
+                        bitrate: res.data.bitrate ?? null,
+                        codec: res.data.codec ?? null,
+                        sampleRate: res.data.sampleRate ?? null,
+                        bitDepth: res.data.bitDepth ?? null,
+                      }
                     }).catch(async err => {
                       console.log(err.message)
                       return Promise.reject(err)

@@ -74,6 +74,15 @@ export default {
           name: 'Download',
         },
         {
+          to: '/subscription',
+          tips: '订阅下载',
+          icon: '#icon-download-2',
+          iconSize: '0 0 425.2 425.2',
+          size,
+          enable: true,
+          name: 'Subscription',
+        },
+        {
           to: '/setting',
           tips: t('setting'),
           icon: '#icon-setting',

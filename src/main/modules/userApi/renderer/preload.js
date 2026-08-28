@@ -65,6 +65,24 @@ const verifyLyricInfo = (info) => {
   }
 }
 
+const verifyMusicUrl = (response, requestedType) => {
+  const detail = typeof response == 'string' ? { url: response } : response
+  if (!detail || typeof detail != 'object') throw new Error('failed')
+  if (typeof detail.url != 'string' || detail.url.length > 2048 || !/^https?:/.test(detail.url)) throw new Error('failed')
+  const qualities = ['128k', '320k', 'flac', 'flac24bit']
+  const quality = qualities.includes(detail.quality) ? detail.quality : null
+  const number = value => typeof value == 'number' && Number.isFinite(value) && value > 0 ? value : null
+  return {
+    type: requestedType,
+    url: detail.url,
+    quality,
+    bitrate: number(detail.bitrate),
+    codec: typeof detail.codec == 'string' && detail.codec.length <= 32 ? detail.codec : null,
+    sampleRate: number(detail.sampleRate),
+    bitDepth: number(detail.bitDepth),
+  }
+}
+
 const handleRequest = (context, { requestKey, data }) => {
   // console.log(data)
   if (!events.request) return sendMessage(USER_API_RENDERER_EVENT_NAME.response, { requestKey }, false, 'Request event is not defined')
@@ -75,14 +93,10 @@ const handleRequest = (context, { requestKey, data }) => {
       }
       switch (data.action) {
         case 'musicUrl':
-          if (typeof response != 'string' || response.length > 2048 || !/^https?:/.test(response)) throw new Error('failed')
           sendData.result = {
             source: data.source,
             action: data.action,
-            data: {
-              type: data.info.type,
-              url: response,
-            },
+            data: verifyMusicUrl(response, data.info.type),
           }
           break
         case 'lyric':

@@ -853,3 +853,83 @@ export const downloadTasksRemove = async(ids: string[]) => {
 export const downloadListClear = async() => {
   return rendererInvoke(WIN_MAIN_RENDERER_EVENT_NAME.download_list_clear)
 }
+
+export const getSubscriptionConfig = async(): Promise<LX.Subscription.Config> => {
+  return rendererInvoke<LX.Subscription.Config>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_config_get)
+}
+export const updateSubscriptionConfig = async(input: LX.Subscription.ConfigUpdate): Promise<LX.Subscription.Config> => {
+  return rendererInvoke<LX.Subscription.ConfigUpdate, LX.Subscription.Config>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_config_update, input)
+}
+export const getSubscriptions = async(): Promise<LX.Subscription.ListItem[]> => {
+  return rendererInvoke<LX.Subscription.ListItem[]>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_list_get)
+}
+export const getDueSubscriptions = async(now: number): Promise<LX.Subscription.ListItem[]> => {
+  return rendererInvoke<number, LX.Subscription.ListItem[]>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_list_due, now)
+}
+export const createSubscription = async(input: LX.Subscription.ListCreate): Promise<LX.Subscription.ListItem> => {
+  return rendererInvoke<LX.Subscription.ListCreate, LX.Subscription.ListItem>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_list_create, input)
+}
+export const updateSubscription = async(input: LX.Subscription.ListUpdate): Promise<LX.Subscription.ListItem> => {
+  return rendererInvoke<LX.Subscription.ListUpdate, LX.Subscription.ListItem>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_list_update, input)
+}
+export const removeSubscription = async(id: string): Promise<void> => {
+  await rendererInvoke(WIN_MAIN_RENDERER_EVENT_NAME.subscription_list_remove, id)
+}
+export const ingestSubscriptionSync = async(input: LX.Subscription.SyncInput): Promise<LX.Subscription.SyncResult> => {
+  return rendererInvoke<LX.Subscription.SyncInput, LX.Subscription.SyncResult>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_sync_ingest, input)
+}
+export const setSubscriptionSyncError = async(input: { id: string, message: string }): Promise<void> => {
+  await rendererInvoke(WIN_MAIN_RENDERER_EVENT_NAME.subscription_sync_error, input)
+}
+export const getSubscriptionTasks = async(status?: LX.Subscription.TaskStatus): Promise<LX.Subscription.Task[]> => {
+  return rendererInvoke<LX.Subscription.TaskStatus | undefined, LX.Subscription.Task[]>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_task_get, status)
+}
+export const updateSubscriptionTask = async(input: LX.Subscription.TaskUpdate): Promise<LX.Subscription.Task> => {
+  return rendererInvoke<LX.Subscription.TaskUpdate, LX.Subscription.Task>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_task_update, input)
+}
+export const retrySubscriptionTasks = async(ids: string[]): Promise<number> => {
+  return rendererInvoke<string[], number>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_task_retry, ids)
+}
+export const getSubscriptionDashboard = async(): Promise<LX.Subscription.Dashboard> => {
+  return rendererInvoke<LX.Subscription.Dashboard>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_dashboard_get)
+}
+export const getSubscriptionDiskInfo = async(): Promise<LX.Subscription.DiskInfo> => {
+  return rendererInvoke<LX.Subscription.DiskInfo>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_disk_info_get)
+}
+export const copySubscriptionToCd2 = async(taskId: string): Promise<LX.Subscription.Task> => {
+  return rendererInvoke<string, LX.Subscription.Task>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_cd2_copy, taskId)
+}
+export const getSubscriptionCd2UploadStatus = async(taskId: string): Promise<LX.Subscription.Cd2UploadStatus> => {
+  return rendererInvoke<string, LX.Subscription.Cd2UploadStatus>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_cd2_upload_status, taskId)
+}
+export const cleanupSubscriptionLocalFile = async(taskId: string): Promise<void> => {
+  await rendererInvoke(WIN_MAIN_RENDERER_EVENT_NAME.subscription_cd2_cleanup_local, taskId)
+}
+export const removeSubscriptionOldCloudFile = async(taskId: string): Promise<void> => {
+  await rendererInvoke(WIN_MAIN_RENDERER_EVENT_NAME.subscription_cd2_remove_old, taskId)
+}
+export const confirmSubscriptionUpload = async(input: {
+  taskId: string
+  cloudPath: string
+  cloudQuality: LX.Subscription.Quality
+  fileNameFormat: string
+  confirmedAt: number
+  cleanupAt: number
+}): Promise<LX.Subscription.Task> => {
+  return rendererInvoke<{ taskId: string, cloudPath: string, cloudQuality: LX.Subscription.Quality, fileNameFormat: string, confirmedAt: number, cleanupAt: number }, LX.Subscription.Task>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_upload_confirm, input)
+}
+export const checkSubscriptionCd2Health = async(): Promise<LX.Subscription.Cd2Health> => {
+  return rendererInvoke<LX.Subscription.Cd2Health>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_cd2_health)
+}
+export const scanSubscriptionCalibration = async(input: LX.Subscription.CalibrationScanInput): Promise<LX.Subscription.CalibrationSummary> => {
+  return rendererInvoke<LX.Subscription.CalibrationScanInput, LX.Subscription.CalibrationSummary>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_calibration_scan, input)
+}
+export const getSubscriptionCalibrationRecords = async(): Promise<LX.Subscription.CalibrationRecord[]> => {
+  return rendererInvoke<LX.Subscription.CalibrationRecord[]>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_calibration_get)
+}
+export const confirmSubscriptionCalibration = async(input: LX.Subscription.CalibrationConfirmInput): Promise<LX.Subscription.CalibrationRecord> => {
+  return rendererInvoke<LX.Subscription.CalibrationConfirmInput, LX.Subscription.CalibrationRecord>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_calibration_confirm, input)
+}
+export const getSubscriptionHistory = async(limit = 500): Promise<LX.Subscription.HistoryItem[]> => {
+  return rendererInvoke<number, LX.Subscription.HistoryItem[]>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_history_get, limit)
+}

@@ -29,6 +29,10 @@ module.exports = merge(baseConfig, {
           to: path.join(__dirname, '../../dist/userApi/renderer/user-api.html'),
         },
         {
+          from: path.join(__dirname, '../../src/main/modules/clouddrive.proto'),
+          to: path.join(__dirname, '../../dist/clouddrive.proto'),
+        },
+        {
           from: path.join(__dirname, '../../src/common/theme/images/*').replace(/\\/g, '/'),
           to: path.join(__dirname, '../../dist/theme_images/[name][ext]'),
         },

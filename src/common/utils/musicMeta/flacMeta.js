@@ -41,17 +41,20 @@ const writeMeta = async(filePath, meta, picPath) => {
     }
   }
 
-  const reader = fs.createReadStream(filePath)
-  const tempPath = filePath + '.lxmtemp'
-  const writer = fs.createWriteStream(tempPath)
-  const flacProcessor = new FlacProcessor()
-  flacProcessor.writeMeta(data)
-
-  reader.pipe(flacProcessor).pipe(writer).on('finish', () => {
-    fs.unlink(filePath, err => {
-      if (err) return console.log(err.message)
-      fs.rename(tempPath, filePath, err => {
-        if (err) console.log(err.message)
+  await new Promise((resolve, reject) => {
+    const reader = fs.createReadStream(filePath)
+    const tempPath = filePath + '.lxmtemp'
+    const writer = fs.createWriteStream(tempPath)
+    const flacProcessor = new FlacProcessor()
+    flacProcessor.writeMeta(data)
+    const onError = err => reject(err)
+    reader.on('error', onError)
+    writer.on('error', onError)
+    flacProcessor.on('error', onError)
+    reader.pipe(flacProcessor).pipe(writer).on('finish', () => {
+      fs.unlink(filePath, err => {
+        if (err) return reject(err)
+        fs.rename(tempPath, filePath, err => err ? reject(err) : resolve())
       })
     })
   })
@@ -62,20 +65,21 @@ module.exports = (filePath, meta, proxy) => {
   let picUrl = meta.APIC
   delete meta.APIC
   if (!/^http/.test(picUrl)) {
-    return writeMeta(filePath, meta)
+    return writeMeta(filePath, meta, picUrl)
   }
   let ext = path.extname(picUrl)
   let picPath = filePath.replace(/\.flac$/, '') + (ext ? ext.replace(extReg, '$1') : '.jpg')
 
   if (picUrl.includes('music.126.net')) picUrl += `${picUrl.includes('?') ? '&' : '?'}param=500y500`
-  download(picUrl, picPath, proxy).then(success => {
+  return download(picUrl, picPath, proxy).then(success => {
     if (success) {
-      writeMeta(filePath, meta, picPath).finally(() => {
+      return writeMeta(filePath, meta, picPath).finally(() => {
         fs.unlink(picPath, err => {
           if (err) console.log(err.message)
         })
       })
-    } else writeMeta(filePath, meta)
+    }
+    return writeMeta(filePath, meta)
   })
 }
 
