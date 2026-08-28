@@ -188,4 +188,10 @@ export default () => {
   mainHandle<number, LX.Subscription.HistoryItem[]>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_history_get, async({ params }) => {
     return global.lx.worker.dbService.getSubscriptionHistory(params)
   })
+  mainHandle<string, number>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_history_clear, async({ params }) => {
+    return global.lx.worker.dbService.clearSubscriptionHistory(params)
+  })
+  mainHandle<string, LX.Subscription.Task>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_history_requeue, async({ params }) => {
+    return global.lx.worker.dbService.requeueSubscriptionMusic(params)
+  })
 }

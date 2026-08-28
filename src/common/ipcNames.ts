@@ -182,6 +182,8 @@ const modules = {
     subscription_structure_get: 'subscription_structure_get',
     subscription_backup_create: 'subscription_backup_create',
     subscription_history_get: 'subscription_history_get',
+    subscription_history_clear: 'subscription_history_clear',
+    subscription_history_requeue: 'subscription_history_requeue',
   },
   winLyric: {
     close: 'close',

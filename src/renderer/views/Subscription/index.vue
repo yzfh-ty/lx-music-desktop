@@ -155,15 +155,24 @@
         </div>
         <div v-if="visibleHistory.length" :class="$style.tableWrap">
           <table :class="$style.table">
-            <thead><tr><th>时间</th><th>歌曲</th><th>平台 / 音质</th><th>状态</th><th>说明</th><th>歌曲键</th></tr></thead>
+            <thead><tr><th>时间</th><th>歌曲</th><th>平台 / 音质</th><th>状态</th><th>路径与状态快照</th><th>说明</th><th>操作</th></tr></thead>
             <tbody>
               <tr v-for="item in visibleHistory" :key="item.id">
                 <td>{{ formatTime(item.createdAt) }}</td>
-                <td><b>{{ item.name }}</b><small>{{ item.singer }}</small></td>
-                <td><small>{{ item.source }}</small><small>{{ historyQualityText(item) }}</small></td>
+                <td><b>{{ item.name }}</b><small>{{ item.singer }} · {{ item.albumName || '未知专辑' }} · {{ formatDuration(item.duration) }}</small><small>{{ item.musicKey }}</small></td>
+                <td><small>{{ item.source }} · {{ historyQualityText(item) }}</small><small v-if="item.sourceUsed">音源 {{ item.sourceUsed }}</small><small v-if="item.actualSource">实际歌曲 {{ item.actualSource }}:{{ item.actualSongId }}</small></td>
                 <td><span :class="$style.taskStatus">{{ statusText(item.status) }}</span></td>
+                <td>
+                  <small v-if="item.localPath">本地：{{ item.localPath }}</small>
+                  <small v-if="item.oldCloudPath">旧云端：{{ item.oldCloudPath }}</small>
+                  <small v-if="item.cloudPath">云端：{{ item.cloudPath }}</small>
+                  <small>阈值 {{ stopQualityText(item.stopQuality) }} · 重试 {{ item.retryCount }} · {{ item.qualitySatisfied ? '已满足阈值' : '可继续检查' }}</small>
+                </td>
                 <td>{{ item.message || '—' }}</td>
-                <td><small>{{ item.musicKey }}</small></td>
+                <td :class="$style.actions">
+                  <button @click="handleHistoryRequeue(item)">重新检查升级</button>
+                  <button :class="$style.danger" @click="handleHistoryClear(item)">清除该歌曲历史</button>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -283,11 +292,13 @@ import { dialog } from '@renderer/plugins/Dialog'
 import { userApi } from '@renderer/store'
 import { downloadList } from '@renderer/store/download/state'
 import {
+  clearSubscriptionHistory,
   createSubscription,
   ignoreTaskMetadataAndUpload,
   pauseTask,
   refreshSubscriptionRuntimeStatus,
   refreshSubscriptionState,
+  requeueSubscriptionHistoryMusic,
   removeSubscription,
   resolveSubscriptionCalibration,
   resumeTask,
@@ -538,6 +549,14 @@ const handleIgnoreMetadata = async(task: LX.Subscription.Task) => {
   if (!await dialog.confirm(`确认忽略“${task.name}”的元数据内嵌限制并继续上传？`)) return
   await run(async() => ignoreTaskMetadataAndUpload(task), '已按用户确认忽略元数据限制')
 }
+const handleHistoryRequeue = async(item: LX.Subscription.HistoryItem) => {
+  if (!await dialog.confirm(`将“${item.name}”重新加入队列并检查可下载版本或音质升级？`)) return
+  await run(async() => requeueSubscriptionHistoryMusic(item.musicKey), '歌曲已重新加入检查队列')
+}
+const handleHistoryClear = async(item: LX.Subscription.HistoryItem) => {
+  if (!await dialog.confirm(`清除“${item.name}”的全部订阅历史？不会删除本地文件、云端文件或音乐库音质记录。`)) return
+  await run(async() => clearSubscriptionHistory(item.musicKey), '该歌曲的历史记录已清除')
+}
 const handlePause = async(task: LX.Subscription.Task) => run(async() => pauseTask(task), '任务已暂停')
 const handleResume = async(task: LX.Subscription.Task) => run(async() => resumeTask(task), '任务已恢复')
 const handleSaveSettings = async() => run(async() => {
@@ -605,6 +624,7 @@ const cleanupRemaining = (cleanupAt: number) => {
   return `${minutes}:${String(seconds % 60).padStart(2, '0')}`
 }
 const qualityText = (quality?: LX.Subscription.Quality | null) => quality == null ? '—' : quality == 'flac24bit' ? '24-bit FLAC' : quality.toUpperCase()
+const stopQualityText = (quality?: LX.Subscription.StopQuality | null) => quality == 'none' ? '不提前停止' : qualityText(quality)
 const historyQualityText = (item: LX.Subscription.HistoryItem) => {
   const qualities = [item.requestedQuality, item.sourceReportedQuality, item.fileVerifiedQuality, item.cloudQuality]
     .filter((quality, index, list) => quality != null && list.indexOf(quality) == index)

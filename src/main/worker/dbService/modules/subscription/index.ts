@@ -179,6 +179,26 @@ const toTask = (row: TaskRow): LX.Subscription.Task => ({
   musicInfo: JSON.parse(row.music_info) as LX.Music.MusicInfoOnline,
 })
 
+const toTaskHistorySnapshot = (task: LX.Subscription.Task, stopQuality = getSubscriptionConfig().stopQuality) => ({
+  requestedQuality: task.requestedQuality,
+  sourceReportedQuality: task.sourceReportedQuality,
+  fileVerifiedQuality: task.fileVerifiedQuality,
+  cloudQuality: task.cloudQuality,
+  sourceUsed: task.sourceUsed,
+  actualSource: task.actualSource,
+  actualSongId: task.actualSongId,
+  localPath: task.localPath,
+  cloudPath: task.cloudPath ?? task.existingCloudPath,
+  oldCloudPath: task.oldCloudPath,
+  fileNameFormat: task.fileNameFormat,
+  retryCount: task.retryCount,
+  cleanupAt: task.cleanupAt,
+  discoveredAt: task.discoveredAt,
+  downloadCompletedAt: task.downloadCompletedAt,
+  uploadCompletedAt: task.uploadCompletedAt,
+  stopQuality,
+})
+
 const taskSelect = `
   SELECT t.*, l.source, l.song_id, l.name, l.singer, l.album_name, l.duration,
     l.music_info, l.cloud_quality, l.cloud_path AS library_cloud_path,
@@ -689,13 +709,7 @@ export const updateSubscriptionTask = (input: LX.Subscription.TaskUpdate): LX.Su
         VALUES (?, ?, ?, ?, ?, ?)
       `).run(next.id, next.musicKey, next.status,
         next.status == 'local_completed' ? 'CD2 同步已关闭，任务仅保留本地成品' : next.failureReason,
-        JSON.stringify({
-          requestedQuality: next.requestedQuality,
-          sourceReportedQuality: next.sourceReportedQuality,
-          fileVerifiedQuality: next.fileVerifiedQuality,
-          cloudQuality: next.cloudQuality,
-          cloudPath: next.cloudPath,
-        }), next.updatedAt)
+        JSON.stringify(toTaskHistorySnapshot(next)), next.updatedAt)
     }
   })()
   return getSubscriptionTasks().find(task => task.id == input.id)!
@@ -758,12 +772,13 @@ export const confirmSubscriptionUpload = (input: {
         file_verified_quality = ?, upload_completed_at = ?, cleanup_at = ?,
         progress = 100, failure_reason = NULL, updated_at = ? WHERE id = ?
     `).run(nextStatus, input.cloudPath, input.cloudQuality, input.confirmedAt, input.cleanupAt, input.confirmedAt, input.taskId)
+    const confirmedTask = toTask(db.prepare(`${taskSelect} WHERE t.id = ?`).get(input.taskId) as TaskRow)
     db.prepare(`
-      INSERT INTO subscription_history (task_id, music_key, status, message, created_at)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO subscription_history (task_id, music_key, status, message, snapshot, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
     `).run(input.taskId, row.music_key, nextStatus,
       nextStatus == 'old_version_cleanup' ? 'CD2 已确认新版本上传成功，等待清理旧扩展名版本' : 'CD2 已确认上传成功',
-      input.confirmedAt)
+      JSON.stringify(toTaskHistorySnapshot(confirmedTask, config.stopQuality)), input.confirmedAt)
   })()
   return getSubscriptionTasks().find(task => task.id == input.taskId)!
 }
@@ -788,9 +803,17 @@ export const getSubscriptionDashboard = (): LX.Subscription.Dashboard => {
 export const getSubscriptionHistory = (limit = 500): LX.Subscription.HistoryItem[] => {
   const safeLimit = Math.max(1, Math.min(2_000, Math.trunc(limit)))
   const rows = getDB().prepare(`
-    SELECT h.*, l.name, l.singer, l.source
+    SELECT h.*, l.name, l.singer, l.album_name, l.duration, l.source,
+      l.cloud_quality AS library_cloud_quality, l.cloud_path AS library_cloud_path,
+      l.file_name_format AS library_file_name_format, l.upload_confirmed_at,
+      l.record_origin, l.calibration_status, l.calibrated_at, l.quality_satisfied,
+      t.requested_quality, t.source_reported_quality, t.file_verified_quality,
+      t.source_used, t.actual_source, t.actual_song_id, t.local_path,
+      t.cloud_path AS task_cloud_path, t.old_cloud_path, t.file_name_format AS task_file_name_format,
+      t.retry_count, t.cleanup_at
     FROM subscription_history h
     JOIN subscription_library l ON l.music_key = h.music_key
+    LEFT JOIN subscription_task t ON t.id = h.task_id
     ORDER BY h.created_at DESC, h.id DESC
     LIMIT ?
   `).all(safeLimit) as Array<{
@@ -799,35 +822,127 @@ export const getSubscriptionHistory = (limit = 500): LX.Subscription.HistoryItem
     music_key: string
     name: string
     singer: string
+    album_name: string
+    duration: number | null
     source: LX.OnlineSource
+    library_cloud_quality: LX.Subscription.Quality | null
+    library_cloud_path: string | null
+    library_file_name_format: string | null
+    upload_confirmed_at: number | null
+    record_origin: LX.Subscription.HistoryItem['recordOrigin']
+    calibration_status: string | null
+    calibrated_at: number | null
+    quality_satisfied: number
+    requested_quality: LX.Subscription.Quality | null
+    source_reported_quality: LX.Subscription.Quality | null
+    file_verified_quality: LX.Subscription.Quality | null
+    source_used: string | null
+    actual_source: string | null
+    actual_song_id: string | null
+    local_path: string | null
+    task_cloud_path: string | null
+    old_cloud_path: string | null
+    task_file_name_format: string | null
+    retry_count: number | null
+    cleanup_at: number | null
     status: LX.Subscription.TaskStatus
     message: string | null
     snapshot: string | null
     created_at: number
   }>
   return rows.map(row => {
-    const snapshot = row.snapshot ? JSON.parse(row.snapshot) as Record<string, unknown> : null
-    const quality = (key: string) => {
+    let snapshot: Record<string, unknown> | null = null
+    try {
+      snapshot = row.snapshot ? JSON.parse(row.snapshot) as Record<string, unknown> : null
+    } catch {}
+    const hasSnapshotValue = (key: string) => snapshot != null && Object.prototype.hasOwnProperty.call(snapshot, key)
+    const quality = (key: string, fallback: LX.Subscription.Quality | null) => {
+      if (!hasSnapshotValue(key)) return fallback
       const value = snapshot?.[key]
       return ['128k', '320k', 'flac', 'flac24bit'].includes(String(value)) ? value as LX.Subscription.Quality : null
     }
+    const stringValue = (key: string, fallback: string | null) => hasSnapshotValue(key)
+      ? typeof snapshot?.[key] == 'string' ? snapshot[key] : null
+      : fallback
+    const numberValue = (key: string, fallback: number | null) => hasSnapshotValue(key)
+      ? typeof snapshot?.[key] == 'number' ? snapshot[key] : null
+      : fallback
+    const stopQualityValue = snapshot?.stopQuality
+    const stopQuality = ['128k', '320k', 'flac', 'flac24bit', 'none'].includes(String(stopQualityValue))
+      ? stopQualityValue as LX.Subscription.StopQuality
+      : null
     return {
       id: row.id,
       taskId: row.task_id,
       musicKey: row.music_key,
       name: row.name,
       singer: row.singer,
+      albumName: row.album_name,
+      duration: row.duration,
       source: row.source,
       status: row.status,
       message: row.message,
       snapshot,
-      requestedQuality: quality('requestedQuality'),
-      sourceReportedQuality: quality('sourceReportedQuality'),
-      fileVerifiedQuality: quality('fileVerifiedQuality'),
-      cloudQuality: quality('cloudQuality'),
+      requestedQuality: quality('requestedQuality', row.requested_quality),
+      sourceReportedQuality: quality('sourceReportedQuality', row.source_reported_quality),
+      fileVerifiedQuality: quality('fileVerifiedQuality', row.file_verified_quality),
+      cloudQuality: quality('cloudQuality', row.library_cloud_quality),
+      sourceUsed: stringValue('sourceUsed', row.source_used),
+      actualSource: stringValue('actualSource', row.actual_source),
+      actualSongId: stringValue('actualSongId', row.actual_song_id),
+      localPath: stringValue('localPath', row.local_path),
+      cloudPath: stringValue('cloudPath', row.task_cloud_path ?? row.library_cloud_path),
+      oldCloudPath: stringValue('oldCloudPath', row.old_cloud_path),
+      fileNameFormat: stringValue('fileNameFormat', row.task_file_name_format ?? row.library_file_name_format),
+      retryCount: numberValue('retryCount', row.retry_count) ?? 0,
+      cleanupAt: numberValue('cleanupAt', row.cleanup_at),
+      uploadConfirmedAt: row.upload_confirmed_at,
+      recordOrigin: row.record_origin,
+      calibrationStatus: row.calibration_status,
+      calibratedAt: row.calibrated_at,
+      qualitySatisfied: row.quality_satisfied == 1,
+      stopQuality,
       createdAt: row.created_at,
     }
   })
+}
+
+export const clearSubscriptionHistory = (musicKey: string): number => {
+  if (!getDB().prepare('SELECT 1 FROM subscription_library WHERE music_key = ?').get(musicKey)) throw new Error('歌曲不存在于订阅音乐库')
+  return getDB().prepare('DELETE FROM subscription_history WHERE music_key = ?').run(musicKey).changes
+}
+
+export const requeueSubscriptionMusic = (musicKey: string): LX.Subscription.Task => {
+  const db = getDB()
+  const row = db.prepare(`${taskSelect} WHERE t.music_key = ?`).get(musicKey) as TaskRow | undefined
+  if (!row) throw new Error('歌曲任务不存在')
+  const current = toTask(row)
+  if (['resolving', 'downloading', 'quality_check', 'tagging', 'uploading', 'old_version_cleanup', 'cleanup_wait'].includes(current.status)) {
+    throw new Error('该歌曲正在处理中，不能重复加入队列')
+  }
+  if (current.status == 'calibration_unresolved') throw new Error('该歌曲仍有未解决的云端校准记录')
+  if (current.localPath) throw new Error('该歌曲仍保留本地成品，请在任务页面继续原任务或完成上传')
+  if (current.existingCloudPath && !current.cloudQuality) throw new Error('该歌曲的云端音质尚未确认，请先完成校准')
+  const now = Date.now()
+  db.transaction(() => {
+    db.prepare(`
+      UPDATE subscription_task SET
+        status = 'pending', requested_quality = NULL, source_reported_quality = NULL,
+        file_verified_quality = NULL, source_used = NULL, actual_source = NULL,
+        actual_song_id = NULL, local_path = NULL, cloud_path = NULL,
+        old_cloud_path = NULL, file_name_format = NULL, upload_started_at = NULL,
+        progress = 0, speed = '', failure_reason = NULL, pause_origin = NULL,
+        cleanup_at = NULL, download_completed_at = NULL, upload_completed_at = NULL,
+        updated_at = ?
+      WHERE music_key = ?
+    `).run(now, musicKey)
+    const next = toTask(db.prepare(`${taskSelect} WHERE t.music_key = ?`).get(musicKey) as TaskRow)
+    db.prepare(`
+      INSERT INTO subscription_history (task_id, music_key, status, message, snapshot, created_at)
+      VALUES (?, ?, 'pending', '用户手动重新检查下载或音质升级', ?, ?)
+    `).run(next.id, musicKey, JSON.stringify(toTaskHistorySnapshot(next)), now)
+  })()
+  return getSubscriptionTasks().find(task => task.musicKey == musicKey)!
 }
 
 const comparablePath = (input: string) => {

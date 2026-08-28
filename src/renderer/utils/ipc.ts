@@ -942,3 +942,9 @@ export const backupSubscriptionDatabase = async(): Promise<LX.Subscription.Backu
 export const getSubscriptionHistory = async(limit = 500): Promise<LX.Subscription.HistoryItem[]> => {
   return rendererInvoke<number, LX.Subscription.HistoryItem[]>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_history_get, limit)
 }
+export const clearSubscriptionHistory = async(musicKey: string): Promise<number> => {
+  return rendererInvoke<string, number>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_history_clear, musicKey)
+}
+export const requeueSubscriptionMusic = async(musicKey: string): Promise<LX.Subscription.Task> => {
+  return rendererInvoke<string, LX.Subscription.Task>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_history_requeue, musicKey)
+}

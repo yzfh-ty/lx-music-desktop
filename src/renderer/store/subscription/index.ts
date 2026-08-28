@@ -3,6 +3,7 @@ import { getListDetailAll as getSongListDetailAll } from '@renderer/store/songLi
 import { getListDetailAll as getBoardListDetailAll } from '@renderer/store/leaderboard/action'
 import {
   backupSubscriptionDatabase,
+  clearSubscriptionHistory as clearSubscriptionHistoryRemote,
   createSubscription as createSubscriptionRemote,
   cleanupSubscriptionLocalFile,
   checkSubscriptionCd2Health,
@@ -21,6 +22,7 @@ import {
   ingestSubscriptionSync,
   removeSubscriptionOldCloudFile,
   removeSubscription as removeSubscriptionRemote,
+  requeueSubscriptionMusic as requeueSubscriptionMusicRemote,
   retrySubscriptionTasks,
   scanSubscriptionCalibration,
   scanSubscriptionStructure,
@@ -172,6 +174,18 @@ export const runSubscriptionBackup = async() => {
   const result = await backupSubscriptionDatabase()
   subscriptionState.config = await getSubscriptionConfig()
   return result
+}
+
+export const clearSubscriptionHistory = async(musicKey: string) => {
+  const count = await clearSubscriptionHistoryRemote(musicKey)
+  await refreshSubscriptionState()
+  return count
+}
+
+export const requeueSubscriptionHistoryMusic = async(musicKey: string) => {
+  await requeueSubscriptionMusicRemote(musicKey)
+  await refreshSubscriptionState()
+  void processSubscriptionQueue()
 }
 
 export const syncSubscription = async(item: LX.Subscription.ListItem) => {

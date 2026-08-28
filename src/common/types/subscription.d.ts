@@ -293,6 +293,8 @@ declare namespace LX {
       musicKey: string
       name: string
       singer: string
+      albumName: string
+      duration: number | null
       source: LX.OnlineSource
       status: TaskStatus
       message: string | null
@@ -301,6 +303,21 @@ declare namespace LX {
       sourceReportedQuality: Quality | null
       fileVerifiedQuality: Quality | null
       cloudQuality: Quality | null
+      sourceUsed: string | null
+      actualSource: string | null
+      actualSongId: string | null
+      localPath: string | null
+      cloudPath: string | null
+      oldCloudPath: string | null
+      fileNameFormat: string | null
+      retryCount: number
+      cleanupAt: number | null
+      uploadConfirmedAt: number | null
+      recordOrigin: 'discovered' | 'calibrated' | 'uploaded'
+      calibrationStatus: string | null
+      calibratedAt: number | null
+      qualitySatisfied: boolean
+      stopQuality: StopQuality | null
       createdAt: number
     }
   }
