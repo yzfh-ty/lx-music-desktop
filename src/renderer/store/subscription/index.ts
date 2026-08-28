@@ -597,6 +597,7 @@ export const initSubscriptionService = async() => {
     void runDueStructureValidation()
     void runDueSubscriptionBackup()
     void processSubscriptionQueue()
+    void refreshSubscriptionRuntimeStatus()
   }, 60_000)
   maintenanceTimer ??= setInterval(() => {
     void processSubscriptionMaintenance()
