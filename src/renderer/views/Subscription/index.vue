@@ -198,11 +198,11 @@
             <base-btn v-if="state.calibrationRun?.status == 'failed'" outline :disabled="busy" @click="handleCalibrationResume">继续上次校准</base-btn>
           </div>
           <div v-if="state.calibrationRun" :class="$style.progressCard" role="status" aria-live="polite">
-            <div><span>{{ calibrationRunStatusText(state.calibrationRun.status) }}</span><b>{{ state.calibrationRun.completed }} / {{ state.calibrationRun.total }}</b></div>
-            <progress :max="Math.max(1, state.calibrationRun.total)" :value="state.calibrationRun.completed" />
-            <small v-if="state.calibrationRun.currentFile">当前：{{ state.calibrationRun.currentFile }}</small>
-            <small v-if="state.calibrationRun.error" :class="$style.rowError">{{ state.calibrationRun.error }}</small>
-            <small v-if="state.calibrationRun.status == 'completed'">匹配 {{ state.calibrationRun.matched }}，待确认 {{ state.calibrationRun.unresolved }}，失败 {{ state.calibrationRun.failed }}</small>
+            <div><span>{{ calibrationRunStatusText(state.calibrationRun?.status) }}</span><b>{{ state.calibrationRun?.completed }} / {{ state.calibrationRun?.total }}</b></div>
+            <progress :max="Math.max(1, state.calibrationRun?.total ?? 0)" :value="state.calibrationRun?.completed ?? 0" />
+            <small v-if="state.calibrationRun?.currentFile">当前：{{ state.calibrationRun?.currentFile }}</small>
+            <small v-if="state.calibrationRun?.error" :class="$style.rowError">{{ state.calibrationRun?.error }}</small>
+            <small v-if="state.calibrationRun?.status == 'completed'">匹配 {{ state.calibrationRun?.matched }}，待确认 {{ state.calibrationRun?.unresolved }}，失败 {{ state.calibrationRun?.failed }}</small>
           </div>
           <p v-if="state.config?.calibrationCompletedAt">最近完成：{{ formatTime(state.config?.calibrationCompletedAt) }}</p>
         </div>
@@ -652,12 +652,12 @@ const historyQualityText = (item: LX.Subscription.HistoryItem) => {
 }
 const formatDuration = (duration?: number | null) => duration == null ? '时长未知' : `${Math.floor(duration / 60)}:${String(Math.round(duration % 60)).padStart(2, '0')}`
 const calibrationStatusText = (status: LX.Subscription.CalibrationRecord['status']) => ({ matched: '已匹配', unresolved: '待人工确认', failed: '读取失败' }[status])
-const calibrationRunStatusText = (status: LX.Subscription.CalibrationRun['status']) => ({
+const calibrationRunStatusText = (status?: LX.Subscription.CalibrationRun['status']) => ({
   collecting: '正在枚举校准文件',
   running: '正在读取音频并校准',
   failed: '校准已中断，可继续',
   completed: '校准已完成',
-}[status])
+}[status ?? 'collecting'])
 const canPause = (task: LX.Subscription.Task) => ['pending', 'downloading'].includes(task.status)
 const canIgnoreMetadata = (task: LX.Subscription.Task) => task.failureReason?.includes('格式不支持内嵌') == true
 const queuePosition = (task: LX.Subscription.Task) => {
