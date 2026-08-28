@@ -6,6 +6,7 @@ import { qualityList, userApi } from '@renderer/store'
 import { appSetting } from '@renderer/store/setting'
 import { dialog } from '@renderer/plugins/Dialog'
 import { setUserApi } from '@renderer/core/apiSource'
+import { mapReportedQuality } from '@renderer/core/music/reportedQuality'
 
 const sendUserApiRequest: typeof sendUserApiRequestRemote = async(data) => {
   let stop: () => void
@@ -60,7 +61,7 @@ export default () => {
                       return {
                         type,
                         url: res.data.url,
-                        sourceReportedQuality: res.data.quality ?? null,
+                        sourceReportedQuality: mapReportedQuality(res.data ?? {}),
                         bitrate: res.data.bitrate ?? null,
                         codec: res.data.codec ?? null,
                         sampleRate: res.data.sampleRate ?? null,
