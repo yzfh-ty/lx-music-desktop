@@ -163,6 +163,34 @@ const migrateV8 = (db: Database.Database) => {
   })()
 }
 
+const migrateV9 = (db: Database.Database) => {
+  const columns = db.prepare('PRAGMA table_info(subscription_config)').all() as Array<{ name: string }>
+  db.transaction(() => {
+    if (!columns.some(column => column.name == 'backup_last_path')) {
+      db.exec('ALTER TABLE subscription_config RENAME TO subscription_config_v10;')
+      db.exec(tables.get('subscription_config')!)
+      db.exec(`
+        INSERT INTO subscription_config (
+          id, stop_quality, cd2_root_path, cd2_grpc_url, cd2_api_token,
+          sync_to_cd2, disk_threshold_bytes, disk_locked, disk_paused_at,
+          calibration_root_path, calibration_recursive,
+          calibration_include_paths, calibration_exclude_paths,
+          calibration_completed_at, created_at, updated_at
+        )
+        SELECT
+          id, stop_quality, cd2_root_path, cd2_grpc_url, cd2_api_token,
+          sync_to_cd2, disk_threshold_bytes, disk_locked, disk_paused_at,
+          calibration_root_path, calibration_recursive,
+          calibration_include_paths, calibration_exclude_paths,
+          calibration_completed_at, created_at, updated_at
+        FROM subscription_config_v10;
+        DROP TABLE subscription_config_v10;
+      `)
+    }
+    db.exec(`${tables.get('subscription_structure_issue')!}\n${tables.get('index_subscription_structure_issue_kind')!}`)
+  })()
+}
+
 export default (db: Database.Database) => {
   // PRAGMA user_version = x
   // console.log(db.prepare('PRAGMA user_version').get().user_version)
@@ -177,6 +205,7 @@ export default (db: Database.Database) => {
       migrateV6(db)
       migrateV7(db)
       migrateV8(db)
+      migrateV9(db)
       db.prepare('UPDATE "main"."db_info" SET "field_value"=@value WHERE "field_name"=@name').run({ name: 'version', value: DB_VERSION })
       break
     case '2':
@@ -186,6 +215,7 @@ export default (db: Database.Database) => {
       migrateV6(db)
       migrateV7(db)
       migrateV8(db)
+      migrateV9(db)
       db.prepare('UPDATE "main"."db_info" SET "field_value"=@value WHERE "field_name"=@name').run({ name: 'version', value: DB_VERSION })
       break
     case '3':
@@ -195,6 +225,7 @@ export default (db: Database.Database) => {
       migrateV6(db)
       migrateV7(db)
       migrateV8(db)
+      migrateV9(db)
       db.prepare('UPDATE "main"."db_info" SET "field_value"=@value WHERE "field_name"=@name').run({ name: 'version', value: DB_VERSION })
       break
     case '4':
@@ -203,6 +234,7 @@ export default (db: Database.Database) => {
       migrateV6(db)
       migrateV7(db)
       migrateV8(db)
+      migrateV9(db)
       db.prepare('UPDATE "main"."db_info" SET "field_value"=@value WHERE "field_name"=@name').run({ name: 'version', value: DB_VERSION })
       break
     case '5':
@@ -210,21 +242,29 @@ export default (db: Database.Database) => {
       migrateV6(db)
       migrateV7(db)
       migrateV8(db)
+      migrateV9(db)
       db.prepare('UPDATE "main"."db_info" SET "field_value"=@value WHERE "field_name"=@name').run({ name: 'version', value: DB_VERSION })
       break
     case '6':
       migrateV6(db)
       migrateV7(db)
       migrateV8(db)
+      migrateV9(db)
       db.prepare('UPDATE "main"."db_info" SET "field_value"=@value WHERE "field_name"=@name').run({ name: 'version', value: DB_VERSION })
       break
     case '7':
       migrateV7(db)
       migrateV8(db)
+      migrateV9(db)
       db.prepare('UPDATE "main"."db_info" SET "field_value"=@value WHERE "field_name"=@name').run({ name: 'version', value: DB_VERSION })
       break
     case '8':
       migrateV8(db)
+      migrateV9(db)
+      db.prepare('UPDATE "main"."db_info" SET "field_value"=@value WHERE "field_name"=@name').run({ name: 'version', value: DB_VERSION })
+      break
+    case '9':
+      migrateV9(db)
       db.prepare('UPDATE "main"."db_info" SET "field_value"=@value WHERE "field_name"=@name').run({ name: 'version', value: DB_VERSION })
       break
   }

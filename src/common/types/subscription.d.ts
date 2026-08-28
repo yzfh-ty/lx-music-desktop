@@ -35,6 +35,13 @@ declare namespace LX {
       calibrationIncludePaths: string[]
       calibrationExcludePaths: string[]
       calibrationCompletedAt: number | null
+      structureRootPath: string
+      structureRecursive: boolean
+      structureIntervalMinutes: number | null
+      structureLastRunAt: number | null
+      backupIntervalMinutes: number | null
+      backupLastAt: number | null
+      backupLastPath: string
       createdAt: number
       updatedAt: number
     }
@@ -53,6 +60,13 @@ declare namespace LX {
       calibrationIncludePaths?: string[]
       calibrationExcludePaths?: string[]
       calibrationCompletedAt?: number | null
+      structureRootPath?: string
+      structureRecursive?: boolean
+      structureIntervalMinutes?: number | null
+      structureLastRunAt?: number | null
+      backupIntervalMinutes?: number | null
+      backupLastAt?: number | null
+      backupLastPath?: string
     }
 
     interface ListItem {
@@ -240,15 +254,51 @@ declare namespace LX {
       musicKey: string
     }
 
+    interface StructureValidationInput {
+      rootPath: string
+      recursive: boolean
+    }
+
+    interface StructureValidationImport extends StructureValidationInput {
+      files: string[]
+      scannedAt: number
+    }
+
+    interface StructureValidationRecord {
+      id: number
+      kind: 'missing' | 'untracked'
+      filePath: string
+      musicKey: string | null
+      scannedAt: number
+    }
+
+    interface StructureValidationSummary {
+      scanned: number
+      present: number
+      missing: number
+      untracked: number
+      scannedAt: number
+    }
+
+    interface BackupResult {
+      path: string
+      createdAt: number
+    }
+
     interface HistoryItem {
       id: number
       taskId: string
       musicKey: string
       name: string
       singer: string
+      source: LX.OnlineSource
       status: TaskStatus
       message: string | null
       snapshot: Record<string, unknown> | null
+      requestedQuality: Quality | null
+      sourceReportedQuality: Quality | null
+      fileVerifiedQuality: Quality | null
+      cloudQuality: Quality | null
       createdAt: number
     }
   }

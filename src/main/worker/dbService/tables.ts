@@ -125,6 +125,8 @@ type Tables = 'db_info'
 | 'index_subscription_history_music_key'
 | 'subscription_calibration'
 | 'index_subscription_calibration_status'
+| 'subscription_structure_issue'
+| 'index_subscription_structure_issue_kind'
 
 const tables = new Map<Tables, string>()
 
@@ -255,6 +257,13 @@ tables.set('subscription_config', `
     "calibration_include_paths" TEXT NOT NULL DEFAULT '[]',
     "calibration_exclude_paths" TEXT NOT NULL DEFAULT '[]',
     "calibration_completed_at" INTEGER,
+    "structure_root_path" TEXT NOT NULL DEFAULT '',
+    "structure_recursive" INTEGER NOT NULL DEFAULT 1,
+    "structure_interval_minutes" INTEGER,
+    "structure_last_run_at" INTEGER,
+    "backup_interval_minutes" INTEGER,
+    "backup_last_at" INTEGER,
+    "backup_last_path" TEXT NOT NULL DEFAULT '',
     "created_at" INTEGER NOT NULL,
     "updated_at" INTEGER NOT NULL,
     PRIMARY KEY("id"),
@@ -400,7 +409,24 @@ tables.set('index_subscription_calibration_status', `
     "scanned_at"
   );
 `)
+tables.set('subscription_structure_issue', `
+  CREATE TABLE "subscription_structure_issue" (
+    "id" INTEGER NOT NULL UNIQUE,
+    "kind" TEXT NOT NULL,
+    "file_path" TEXT NOT NULL,
+    "music_key" TEXT,
+    "scanned_at" INTEGER NOT NULL,
+    PRIMARY KEY("id" AUTOINCREMENT),
+    UNIQUE("kind", "file_path")
+  );
+`)
+tables.set('index_subscription_structure_issue_kind', `
+  CREATE INDEX "index_subscription_structure_issue_kind" ON "subscription_structure_issue" (
+    "kind",
+    "scanned_at"
+  );
+`)
 
 export default tables
 
-export const DB_VERSION = '9'
+export const DB_VERSION = '10'

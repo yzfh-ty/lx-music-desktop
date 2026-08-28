@@ -10,6 +10,7 @@ import {
   removeSubscriptionOldCloudFile,
 } from '@main/modules/subscription/cd2'
 import { scanSubscriptionCalibration } from '@main/modules/subscription/calibration'
+import { scanSubscriptionStructure } from '@main/modules/subscription/structureValidation'
 
 const comparablePath = (input: string) => {
   const resolved = path.resolve(input).replace(/[\\/]+$/, '')
@@ -102,6 +103,7 @@ export default () => {
       config,
       localPath: task.localPath,
       currentCloudPath: task.existingCloudPath,
+      retryCloudPath: task.cloudPath,
     })
     return global.lx.worker.dbService.updateSubscriptionTask({
       id: task.id,
@@ -159,6 +161,29 @@ export default () => {
   })
   mainHandle<LX.Subscription.CalibrationConfirmInput, LX.Subscription.CalibrationRecord>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_calibration_confirm, async({ params }) => {
     return global.lx.worker.dbService.confirmSubscriptionCalibration(params)
+  })
+  mainHandle<LX.Subscription.StructureValidationInput, LX.Subscription.StructureValidationSummary>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_structure_scan, async({ params }) => {
+    const config = await global.lx.worker.dbService.updateSubscriptionConfig({
+      structureRootPath: params.rootPath,
+      structureRecursive: params.recursive,
+    })
+    const files = await scanSubscriptionStructure(config, params)
+    return global.lx.worker.dbService.importSubscriptionStructureValidation({
+      ...params,
+      files,
+      scannedAt: Date.now(),
+    })
+  })
+  mainHandle<LX.Subscription.StructureValidationRecord[]>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_structure_get, async() => {
+    return global.lx.worker.dbService.getSubscriptionStructureValidationRecords()
+  })
+  mainHandle<LX.Subscription.BackupResult>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_backup_create, async() => {
+    const config = await global.lx.worker.dbService.getSubscriptionConfig()
+    const health = await checkSubscriptionCd2Health(config)
+    const backupDir = path.join(health.rootPath, '.lx-subscription-backups')
+    await fs.promises.mkdir(backupDir, { recursive: true })
+    const timestamp = new Date().toISOString().replace(/[-:.]/g, '')
+    return global.lx.worker.dbService.backupSubscriptionDatabase(path.join(backupDir, `lx-data-${timestamp}.db`))
   })
   mainHandle<number, LX.Subscription.HistoryItem[]>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_history_get, async({ params }) => {
     return global.lx.worker.dbService.getSubscriptionHistory(params)

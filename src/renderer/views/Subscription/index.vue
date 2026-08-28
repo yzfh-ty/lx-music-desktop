@@ -63,6 +63,15 @@
           </div>
           <p>未设置有效周期时不会自动同步，仍可使用“立即同步”。</p>
         </div>
+        <div v-if="editingSubscriptionId" :class="[$style.formCard, $style.editCard]">
+          <h3>编辑订阅</h3>
+          <div :class="$style.editRow">
+            <label><span>名称</span><base-input v-model="subscriptionEdit.name" /></label>
+            <label><span>同步周期（分钟）</span><base-input v-model="subscriptionEdit.interval" type="number" placeholder="留空表示仅手动" /></label>
+            <base-btn min :disabled="busy || !subscriptionEdit.name.trim()" @click="handleSaveSubscriptionEdit">保存</base-btn>
+            <base-btn min outline :disabled="busy" @click="cancelSubscriptionEdit">取消</base-btn>
+          </div>
+        </div>
 
         <div v-if="state.subscriptions.length" :class="$style.tableWrap">
           <table :class="$style.table">
@@ -77,6 +86,7 @@
                 <td><span :class="item.enabled ? $style.statusOn : $style.statusOff">{{ item.enabled ? '运行中' : '已暂停' }}</span></td>
                 <td :class="$style.actions">
                   <button :disabled="isSyncing(item.id)" @click="handleSync(item)">{{ isSyncing(item.id) ? '同步中' : '立即同步' }}</button>
+                  <button @click="startSubscriptionEdit(item)">编辑</button>
                   <button @click="handleToggle(item)">{{ item.enabled ? '暂停' : '恢复' }}</button>
                   <button :class="$style.danger" @click="handleRemove(item)">删除</button>
                 </td>
@@ -90,20 +100,41 @@
       <section v-else-if="activeTab == 'tasks' || activeTab == 'failed'" :class="$style.section">
         <div :class="$style.taskToolbar">
           <span>{{ activeTab == 'failed' ? '失败任务只允许手动重试' : '当前持久化任务队列' }}</span>
-          <base-btn v-if="activeTab == 'failed'" min :disabled="!visibleTasks.length || busy" @click="handleRetryAll">重试全部失败任务</base-btn>
+          <div v-if="activeTab == 'failed'" :class="$style.toolbarActions">
+            <base-btn min outline :disabled="!selectedRetryIds.length || busy" @click="handleRetrySelected">重试已选（{{ selectedRetryIds.length }}）</base-btn>
+            <base-btn min :disabled="!visibleTasks.length || busy" @click="handleRetryAll">重试全部失败任务</base-btn>
+          </div>
         </div>
         <div v-if="visibleTasks.length" :class="$style.tableWrap">
           <table :class="$style.table">
-            <thead><tr><th>歌曲</th><th>音质链路</th><th>状态</th><th>进度</th><th>路径 / 原因</th><th>操作</th></tr></thead>
+            <thead><tr><th v-if="activeTab == 'failed'"><input type="checkbox" :checked="allFailedSelected" aria-label="选择全部失败任务" @change="toggleAllFailed" /></th><th>队列</th><th>歌曲</th><th>音质链路</th><th>状态</th><th>进度</th><th>路径 / 原因</th><th>操作</th></tr></thead>
             <tbody>
               <tr v-for="task in visibleTasks" :key="task.id">
+                <td v-if="activeTab == 'failed'" :class="$style.rowCheck"><input type="checkbox" :checked="selectedRetryIds.includes(task.id)" :aria-label="`选择 ${task.name}`" @change="toggleRetrySelection(task.id, $event)" /></td>
+                <td>{{ queuePosition(task) }}</td>
                 <td><b>{{ task.name }}</b><small>{{ task.singer }} · {{ task.source }}:{{ task.songId }}</small></td>
-                <td><small>请求 {{ qualityText(task.requestedQuality) }}</small><small>报告 {{ qualityText(task.sourceReportedQuality) }}</small><small>复核 {{ qualityText(task.fileVerifiedQuality) }} / 云端 {{ qualityText(task.cloudQuality) }}</small></td>
+                <td>
+                  <small>请求 {{ qualityText(task.requestedQuality) }}</small>
+                  <small>报告 {{ qualityText(task.sourceReportedQuality) }}</small>
+                  <small>复核 {{ qualityText(task.fileVerifiedQuality) }} / 云端 {{ qualityText(task.cloudQuality) }}</small>
+                  <small v-if="task.sourceUsed">音源 {{ task.sourceUsed }}</small>
+                  <small v-if="task.actualSource">实际歌曲 {{ task.actualSource }}:{{ task.actualSongId }}</small>
+                </td>
                 <td><span :class="$style.taskStatus">{{ statusText(task.status) }}</span><small v-if="task.cleanupAt">剩余 {{ cleanupRemaining(task.cleanupAt) }}（{{ formatTime(task.cleanupAt) }}）</small></td>
                 <td>{{ task.progress.toFixed(1) }}%<small v-if="task.speed">{{ task.speed }}/s</small></td>
-                <td><small>{{ task.failureReason || task.cloudPath || task.existingCloudPath || task.localPath || '—' }}</small></td>
+                <td>
+                  <small v-if="task.failureReason" :class="$style.rowError">{{ task.failureReason }}</small>
+                  <small v-if="task.localPath">本地：{{ task.localPath }}</small>
+                  <small v-if="task.oldCloudPath">旧云端：{{ task.oldCloudPath }}</small>
+                  <small v-if="task.cloudPath || task.existingCloudPath">云端：{{ task.cloudPath || task.existingCloudPath }}</small>
+                  <small v-if="!task.failureReason && !task.localPath && !task.oldCloudPath && !task.cloudPath && !task.existingCloudPath">—</small>
+                </td>
                 <td :class="$style.actions">
-                  <button v-if="task.status == 'failed'" @click="handleRetry(task)">手动重试</button>
+                  <template v-if="task.status == 'failed'">
+                    <button @click="handleRetry(task)">手动重试</button>
+                    <button v-if="canIgnoreMetadata(task)" @click="handleIgnoreMetadata(task)">忽略元数据并继续</button>
+                  </template>
+                  <button v-else-if="task.status == 'local_completed' && state.config?.syncToCd2" @click="handleUploadLocal(task)">上传到 CD2</button>
                   <button v-else-if="canPause(task)" @click="handlePause(task)">暂停</button>
                   <button v-else-if="task.status == 'disk_paused'" @click="handleResume(task)">继续</button>
                   <span v-else>—</span>
@@ -116,13 +147,20 @@
       </section>
 
       <section v-else-if="activeTab == 'history'" :class="$style.section">
-        <div v-if="state.history.length" :class="$style.tableWrap">
+        <div :class="$style.filterBar">
+          <base-input v-model="historyFilter.keyword" placeholder="搜索歌曲、歌手或歌曲键" />
+          <base-selection v-model="historyFilter.source" :list="historySourceOptions" item-key="id" item-name="name" />
+          <base-selection v-model="historyFilter.quality" :list="historyQualityOptions" item-key="id" item-name="name" />
+          <base-selection v-model="historyFilter.status" :list="historyStatusOptions" item-key="id" item-name="name" />
+        </div>
+        <div v-if="visibleHistory.length" :class="$style.tableWrap">
           <table :class="$style.table">
-            <thead><tr><th>时间</th><th>歌曲</th><th>状态</th><th>说明</th><th>歌曲键</th></tr></thead>
+            <thead><tr><th>时间</th><th>歌曲</th><th>平台 / 音质</th><th>状态</th><th>说明</th><th>歌曲键</th></tr></thead>
             <tbody>
-              <tr v-for="item in state.history" :key="item.id">
+              <tr v-for="item in visibleHistory" :key="item.id">
                 <td>{{ formatTime(item.createdAt) }}</td>
                 <td><b>{{ item.name }}</b><small>{{ item.singer }}</small></td>
+                <td><small>{{ item.source }}</small><small>{{ historyQualityText(item) }}</small></td>
                 <td><span :class="$style.taskStatus">{{ statusText(item.status) }}</span></td>
                 <td>{{ item.message || '—' }}</td>
                 <td><small>{{ item.musicKey }}</small></td>
@@ -130,7 +168,7 @@
             </tbody>
           </table>
         </div>
-        <div v-else :class="$style.empty">暂无历史记录</div>
+        <div v-else :class="$style.empty">没有符合条件的历史记录</div>
       </section>
 
       <section v-else-if="activeTab == 'calibration'" :class="$style.section">
@@ -174,6 +212,36 @@
             </tbody>
           </table>
         </div>
+        <div :class="[$style.formCard, $style.editCard]">
+          <h3>目录结构校验</h3>
+          <p>仅枚举音频文件路径并与订阅音乐库记录对照，不读取音频内容。可手动执行，也可设置周期自动检查。</p>
+          <div :class="$style.calibrationGrid">
+            <label><span>校验根目录</span><base-input v-model="structure.rootPath" placeholder="默认使用 CD2 音乐库根目录" /></label>
+            <label><span>自动周期（分钟）</span><base-input v-model="structure.interval" type="number" placeholder="留空关闭自动校验" /></label>
+            <label>
+              <span>扫描子目录</span>
+              <base-checkbox id="subscription_structure_recursive" :model-value="structure.recursive" label="递归扫描" @update:model-value="structure.recursive = $event" />
+            </label>
+          </div>
+          <div :class="$style.settingsActions">
+            <base-btn outline :disabled="busy" @click="handleSaveStructureSettings">保存校验设置</base-btn>
+            <base-btn :disabled="busy" @click="handleStructureValidation">立即校验</base-btn>
+          </div>
+          <p>最近校验：{{ formatTime(state.config?.structureLastRunAt) }}；当前发现 {{ state.structureRecords.length }} 个结构问题。</p>
+        </div>
+        <div v-if="state.structureRecords.length" :class="$style.tableWrap">
+          <table :class="$style.table">
+            <thead><tr><th>类型</th><th>文件路径</th><th>歌曲键</th><th>检测时间</th></tr></thead>
+            <tbody>
+              <tr v-for="record in state.structureRecords" :key="record.id">
+                <td><span :class="$style.taskStatus">{{ record.kind == 'missing' ? '记录存在但文件缺失' : '文件存在但未被记录' }}</span></td>
+                <td><small>{{ record.filePath }}</small></td>
+                <td><small>{{ record.musicKey || '—' }}</small></td>
+                <td>{{ formatTime(record.scannedAt) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section v-else :class="$style.section">
@@ -195,12 +263,14 @@
             当前为仅本地下载模式：仍会下载歌曲并按原版设置处理元数据、封面和歌词，但不会复制到 CD2 挂载目录，也不会执行 gRPC 上传确认和 20 分钟延迟清理。
           </div>
           <label><span>本地磁盘阈值（GB）</span><base-input v-model="settings.diskThresholdGb" type="number" /></label>
+          <label><span>数据库备份周期（分钟）</span><base-input v-model="settings.backupInterval" type="number" placeholder="留空关闭自动备份" /></label>
           <div :class="$style.settingsActions">
             <base-btn :disabled="busy" @click="handleSaveSettings">保存设置</base-btn>
             <base-btn v-if="settings.syncToCd2" outline :disabled="busy" @click="handleTestCd2">测试已保存的 CD2 配置</base-btn>
+            <base-btn v-if="settings.syncToCd2" outline :disabled="busy" @click="handleBackup">立即备份数据库</base-btn>
             <base-btn v-if="state.config?.diskLocked" outline :disabled="busy" @click="handleUnlockDisk">我已清理磁盘，手动恢复</base-btn>
           </div>
-          <p>下载目录、文件名格式、并发数、封面、歌词和 LRC 继续使用 LX Music 原版设置。</p>
+          <p>下载目录、文件名格式、并发数、封面、歌词和 LRC 继续使用 LX Music 原版设置。最近备份：{{ formatTime(state.config?.backupLastAt) }} {{ state.config?.backupLastPath || '' }}</p>
         </div>
       </section>
     </main>
@@ -212,8 +282,10 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from '@common/utils/vueTools'
 import { dialog } from '@renderer/plugins/Dialog'
 import { userApi } from '@renderer/store'
+import { downloadList } from '@renderer/store/download/state'
 import {
   createSubscription,
+  ignoreTaskMetadataAndUpload,
   pauseTask,
   refreshSubscriptionRuntimeStatus,
   refreshSubscriptionState,
@@ -221,13 +293,16 @@ import {
   resolveSubscriptionCalibration,
   resumeTask,
   retryTasks,
+  runSubscriptionBackup,
   runSubscriptionCalibration,
+  runSubscriptionStructureValidation,
   saveSubscriptionConfig,
   subscriptionState as state,
   syncSubscription,
   testSubscriptionCd2,
   unlockDiskQueue,
   updateSubscription,
+  uploadLocalCompletedTask,
 } from '@renderer/store/subscription'
 import ListPicker from './components/ListPicker.vue'
 
@@ -237,8 +312,13 @@ const listPickerVisible = ref(false)
 const notice = ref('')
 const noticeError = ref(false)
 const currentTime = ref(Date.now())
+const editingSubscriptionId = ref<string | null>(null)
+const selectedRetryIds = ref<string[]>([])
 const newItem = reactive({ source: 'wy' as LX.OnlineSource, listType: 'playlist' as LX.Subscription.ListType, listId: '', name: '', interval: '' })
+const subscriptionEdit = reactive({ name: '', interval: '' })
+const historyFilter = reactive({ keyword: '', source: 'all', quality: 'all', status: 'all' })
 const calibration = reactive({ rootPath: '', includePaths: '', excludePaths: '', recursive: true })
+const structure = reactive({ rootPath: '', recursive: true, interval: '' })
 const manualCalibrationKeys = reactive<Record<number, string>>({})
 const settings = ref<{
   stopQuality: LX.Subscription.StopQuality
@@ -247,6 +327,7 @@ const settings = ref<{
   cd2ApiToken: string
   syncToCd2: boolean
   diskThresholdGb: string
+  backupInterval: string
 }>({
   stopQuality: 'flac',
   cd2RootPath: '',
@@ -254,8 +335,10 @@ const settings = ref<{
   cd2ApiToken: '',
   syncToCd2: true,
   diskThresholdGb: '30',
+  backupInterval: '',
 })
 let calibrationInited = false
+let structureInited = false
 
 const tabs = [
   { id: 'overview', label: '概览' },
@@ -275,6 +358,16 @@ const qualityOptions = [
   { id: 'flac', name: 'FLAC' }, { id: 'flac24bit', name: '24-bit FLAC' },
   { id: 'none', name: '不提前停止' },
 ]
+const historySourceOptions = [{ id: 'all', name: '全部平台' }, ...sourceOptions]
+const historyQualityOptions = [{ id: 'all', name: '全部音质' }, ...qualityOptions.filter(item => item.id != 'none')]
+const historyStatusOptions = [
+  { id: 'all', name: '全部状态' },
+  { id: 'pending', name: '等待下载' }, { id: 'downloading', name: '下载中' },
+  { id: 'tagging', name: '写入元数据' }, { id: 'uploading', name: '上传中' },
+  { id: 'cleanup_wait', name: '延迟清理' }, { id: 'uploaded', name: '已上传' },
+  { id: 'local_completed', name: '仅本地完成' }, { id: 'failed', name: '失败' },
+  { id: 'calibration_unresolved', name: '待人工校准' },
+]
 
 const dashboardCards = computed(() => [
   { label: '订阅', value: state.dashboard?.subscriptionCount ?? 0 },
@@ -284,7 +377,41 @@ const dashboardCards = computed(() => [
   { label: '失败', value: state.dashboard?.failedCount ?? 0 },
   { label: '音乐库', value: state.dashboard?.libraryCount ?? 0 },
 ])
-const visibleTasks = computed(() => activeTab.value == 'failed' ? state.tasks.filter(task => task.status == 'failed') : state.tasks)
+const downloadTaskStatusMap: Partial<Record<LX.Download.DownloadTaskStatus, LX.Subscription.TaskStatus>> = {
+  run: 'downloading',
+  waiting: 'pending',
+  pause: 'disk_paused',
+  error: 'failed',
+}
+const liveTasks = computed(() => state.tasks.map(task => {
+  const downloadInfo = downloadList.find(item => item.metadata.subscriptionTaskId == task.id)
+  if (!downloadInfo || downloadInfo.isComplate) return task
+  const status = downloadTaskStatusMap[downloadInfo.status] ?? task.status
+  return {
+    ...task,
+    status,
+    progress: downloadInfo.progress,
+    speed: downloadInfo.speed,
+    failureReason: downloadInfo.status == 'error' ? downloadInfo.statusText || task.failureReason : task.failureReason,
+  }
+}))
+const visibleTasks = computed(() => activeTab.value == 'failed' ? liveTasks.value.filter(task => task.status == 'failed') : liveTasks.value)
+const allFailedSelected = computed(() => visibleTasks.value.length > 0 && visibleTasks.value.every(task => selectedRetryIds.value.includes(task.id)))
+const visibleHistory = computed(() => {
+  const keyword = historyFilter.keyword.trim().toLocaleLowerCase()
+  return state.history.filter(item => {
+    if (keyword && !`${item.name} ${item.singer} ${item.musicKey}`.toLocaleLowerCase().includes(keyword)) return false
+    if (historyFilter.source != 'all' && item.source != historyFilter.source) return false
+    if (historyFilter.status != 'all' && item.status != historyFilter.status) return false
+    if (historyFilter.quality != 'all' && ![
+      item.requestedQuality,
+      item.sourceReportedQuality,
+      item.fileVerifiedQuality,
+      item.cloudQuality,
+    ].some(quality => quality == historyFilter.quality)) return false
+    return true
+  })
+})
 const canCreate = computed(() => newItem.listId.trim() && newItem.name.trim() && (!newItem.interval || Number(newItem.interval) > 0))
 const cd2StatusOk = computed(() => !state.config?.syncToCd2 || state.cd2Health?.writable == true)
 const cd2StatusText = computed(() => {
@@ -306,6 +433,12 @@ watch(() => state.config, config => {
     calibration.excludePaths = config.calibrationExcludePaths.join(', ')
     calibrationInited = true
   }
+  if (!structureInited) {
+    structure.rootPath = config.structureRootPath || config.cd2RootPath
+    structure.recursive = config.structureRecursive
+    structure.interval = config.structureIntervalMinutes == null ? '' : String(config.structureIntervalMinutes)
+    structureInited = true
+  }
   settings.value = {
     stopQuality: config.stopQuality,
     cd2RootPath: config.cd2RootPath,
@@ -313,6 +446,7 @@ watch(() => state.config, config => {
     cd2ApiToken: config.cd2ApiToken,
     syncToCd2: config.syncToCd2,
     diskThresholdGb: String(Math.round(config.diskThresholdBytes / 1024 / 1024 / 1024)),
+    backupInterval: config.backupIntervalMinutes == null ? '' : String(config.backupIntervalMinutes),
   }
 }, { immediate: true })
 
@@ -362,17 +496,59 @@ const handleToggle = async(item: LX.Subscription.ListItem) => run(
   async() => updateSubscription({ id: item.id, enabled: !item.enabled }),
   item.enabled ? '订阅已暂停' : '订阅已恢复',
 )
+const startSubscriptionEdit = (item: LX.Subscription.ListItem) => {
+  editingSubscriptionId.value = item.id
+  subscriptionEdit.name = item.name
+  subscriptionEdit.interval = item.intervalMinutes == null ? '' : String(item.intervalMinutes)
+}
+const cancelSubscriptionEdit = () => { editingSubscriptionId.value = null }
+const handleSaveSubscriptionEdit = async() => run(async() => {
+  if (!editingSubscriptionId.value) return
+  const interval = subscriptionEdit.interval.trim() ? Number(subscriptionEdit.interval) : null
+  if (interval != null && (!Number.isInteger(interval) || interval <= 0)) throw new Error('同步周期必须是正整数分钟')
+  await updateSubscription({ id: editingSubscriptionId.value, name: subscriptionEdit.name, intervalMinutes: interval })
+  editingSubscriptionId.value = null
+}, '订阅设置已更新')
 const handleRemove = async(item: LX.Subscription.ListItem) => {
   if (!await dialog.confirm(`删除订阅“${item.name}”？已下载歌曲、全局音乐库和历史任务不会被删除。`)) return
   await run(async() => removeSubscription(item.id), '订阅已删除')
 }
 const handleRetry = async(task: LX.Subscription.Task) => run(async() => retryTasks([task.id]), '任务已重新加入队列')
-const handleRetryAll = async() => run(async() => retryTasks(visibleTasks.value.map(task => task.id)), '失败任务已重新加入队列')
+const handleRetrySelected = async() => run(async() => {
+  const count = await retryTasks(selectedRetryIds.value)
+  selectedRetryIds.value = []
+  return count
+}, count => `已将 ${count} 个任务重新加入队列`)
+const handleRetryAll = async() => run(async() => {
+  const count = await retryTasks(visibleTasks.value.map(task => task.id))
+  selectedRetryIds.value = []
+  return count
+}, count => `已将 ${count} 个失败任务重新加入队列`)
+const toggleRetrySelection = (id: string, event: Event) => {
+  const checked = event.currentTarget instanceof HTMLInputElement && event.currentTarget.checked
+  selectedRetryIds.value = checked
+    ? Array.from(new Set([...selectedRetryIds.value, id]))
+    : selectedRetryIds.value.filter(taskId => taskId != id)
+}
+const toggleAllFailed = (event: Event) => {
+  const checked = event.currentTarget instanceof HTMLInputElement && event.currentTarget.checked
+  selectedRetryIds.value = checked ? visibleTasks.value.map(task => task.id) : []
+}
+const handleUploadLocal = async(task: LX.Subscription.Task) => {
+  if (!await dialog.confirm(`将本地成品“${task.name}”明确上传到 CD2？`)) return
+  await run(async() => uploadLocalCompletedTask(task), '已开始上传本地成品')
+}
+const handleIgnoreMetadata = async(task: LX.Subscription.Task) => {
+  if (!await dialog.confirm(`确认忽略“${task.name}”的元数据内嵌限制并继续上传？`)) return
+  await run(async() => ignoreTaskMetadataAndUpload(task), '已按用户确认忽略元数据限制')
+}
 const handlePause = async(task: LX.Subscription.Task) => run(async() => pauseTask(task), '任务已暂停')
 const handleResume = async(task: LX.Subscription.Task) => run(async() => resumeTask(task), '任务已恢复')
 const handleSaveSettings = async() => run(async() => {
   const threshold = Number(settings.value.diskThresholdGb)
   if (!Number.isFinite(threshold) || threshold <= 0) throw new Error('磁盘阈值必须大于 0 GB')
+  const backupInterval = settings.value.backupInterval.trim() ? Number(settings.value.backupInterval) : null
+  if (backupInterval != null && (!Number.isInteger(backupInterval) || backupInterval <= 0)) throw new Error('数据库备份周期必须是正整数分钟')
   await saveSubscriptionConfig({
     stopQuality: settings.value.stopQuality,
     cd2RootPath: settings.value.cd2RootPath,
@@ -380,11 +556,13 @@ const handleSaveSettings = async() => run(async() => {
     cd2ApiToken: settings.value.cd2ApiToken,
     syncToCd2: settings.value.syncToCd2,
     diskThresholdBytes: Math.round(threshold * 1024 * 1024 * 1024),
+    backupIntervalMinutes: backupInterval,
   })
 }, '设置已保存')
 const handleTestCd2 = async() => run(async() => {
   await testSubscriptionCd2()
 }, 'CD2 连接与挂载检查通过')
+const handleBackup = async() => run(runSubscriptionBackup, result => `数据库已备份到 ${result.path}`)
 const parsePathList = (value: string) => value.split(/[,，\n]/).map(item => item.trim()).filter(Boolean)
 const handleCalibration = async() => run(async() => runSubscriptionCalibration({
   rootPath: calibration.rootPath,
@@ -396,6 +574,27 @@ const handleCalibrationConfirm = async(record: LX.Subscription.CalibrationRecord
   async() => resolveSubscriptionCalibration({ recordId: record.id, musicKey: musicKey.trim() }),
   '校准关联已人工确认',
 )
+const structureInterval = () => {
+  if (!structure.interval.trim()) return null
+  const interval = Number(structure.interval)
+  if (!Number.isInteger(interval) || interval <= 0) throw new Error('目录校验周期必须是正整数分钟')
+  return interval
+}
+const handleSaveStructureSettings = async() => run(async() => {
+  await saveSubscriptionConfig({
+    structureRootPath: structure.rootPath,
+    structureRecursive: structure.recursive,
+    structureIntervalMinutes: structureInterval(),
+  })
+}, '目录校验设置已保存')
+const handleStructureValidation = async() => run(async() => {
+  await saveSubscriptionConfig({
+    structureRootPath: structure.rootPath,
+    structureRecursive: structure.recursive,
+    structureIntervalMinutes: structureInterval(),
+  })
+  return runSubscriptionStructureValidation({ rootPath: structure.rootPath, recursive: structure.recursive })
+}, result => `目录校验完成：扫描 ${result.scanned}，已记录 ${result.present}，缺失 ${result.missing}，未登记 ${result.untracked}`)
 const handleUnlockDisk = async() => run(unlockDiskQueue, '磁盘队列锁定已手动解除，暂停任务已恢复排队')
 
 const isSyncing = (id: string) => state.syncingIds.includes(id)
@@ -413,9 +612,19 @@ const cleanupRemaining = (cleanupAt: number) => {
   return `${minutes}:${String(seconds % 60).padStart(2, '0')}`
 }
 const qualityText = (quality?: LX.Subscription.Quality | null) => quality == null ? '—' : quality == 'flac24bit' ? '24-bit FLAC' : quality.toUpperCase()
+const historyQualityText = (item: LX.Subscription.HistoryItem) => {
+  const qualities = [item.requestedQuality, item.sourceReportedQuality, item.fileVerifiedQuality, item.cloudQuality]
+    .filter((quality, index, list) => quality != null && list.indexOf(quality) == index)
+  return qualities.length ? qualities.map(qualityText).join(' / ') : '—'
+}
 const formatDuration = (duration?: number | null) => duration == null ? '时长未知' : `${Math.floor(duration / 60)}:${String(Math.round(duration % 60)).padStart(2, '0')}`
 const calibrationStatusText = (status: LX.Subscription.CalibrationRecord['status']) => ({ matched: '已匹配', unresolved: '待人工确认', failed: '读取失败' }[status])
 const canPause = (task: LX.Subscription.Task) => ['pending', 'downloading'].includes(task.status)
+const canIgnoreMetadata = (task: LX.Subscription.Task) => task.failureReason?.includes('格式不支持内嵌') == true
+const queuePosition = (task: LX.Subscription.Task) => {
+  const index = downloadList.findIndex(item => item.metadata.subscriptionTaskId == task.id && !item.isComplate)
+  return index < 0 ? '—' : index + 1
+}
 const statusText = (status: LX.Subscription.TaskStatus) => ({
   discovered: '已发现',
   calibrating: '校准中',
@@ -464,16 +673,21 @@ onBeforeUnmount(() => {
 .ok { color: var(--color-primary); }.warn, .rowError { color: #d98d35; }
 .callout { margin-top: 14px; padding: 12px 14px; line-height: 1.6; border-left: 4px solid var(--color-primary-alpha-500); background: var(--color-primary-alpha-100); display: flex; align-items: center; justify-content: space-between; gap: 14px; }
 .formCard { padding: 14px; border-radius: 6px; background: var(--color-primary-background); h3 { margin: 0 0 12px; } > p { margin: 9px 0 0; color: var(--color-font-label); font-size: 12px; line-height: 1.6; } }
+.editCard { margin-top: 10px; }
 .formRow { display: grid; grid-template-columns: 145px minmax(180px, 2fr) minmax(140px, 1fr) minmax(130px, .8fr) auto auto; gap: 8px; align-items: center; > * { min-width: 0; } }
+.editRow { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto auto; gap: 10px; align-items: end; label { display: flex; flex-direction: column; gap: 6px; span { color: var(--color-font-label); font-size: 12px; } } }
 .select { padding: 0; gap: 10px; }
 .tableWrap { margin-top: 14px; overflow-x: auto; border-radius: 6px; border: 1px solid var(--color-primary-alpha-100); }
 .table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: left; th { padding: 10px; color: var(--color-font-label); white-space: nowrap; background: var(--color-primary-background); } td { padding: 10px; border-top: 1px solid var(--color-primary-alpha-100); vertical-align: middle; max-width: 250px; overflow-wrap: anywhere; } small { display: block; margin-top: 4px; color: var(--color-font-label); line-height: 1.4; } }
 .actions { white-space: nowrap; button { appearance: none; border: 0; padding: 3px 5px; color: var(--color-primary); background: transparent; cursor: pointer; font-size: 12px; &:hover { text-decoration: underline; } &:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 1px; } &:disabled { opacity: .4; cursor: default; } } .danger { color: #d65b5b; } }
 .statusOn, .statusOff, .taskStatus { display: inline-block; padding: 2px 7px; border-radius: 10px; background: var(--color-primary-alpha-100); color: var(--color-primary); white-space: nowrap; }.statusOff { color: var(--color-font-label); }
 .taskToolbar { display: flex; justify-content: space-between; align-items: center; min-height: 30px; color: var(--color-font-label); }
+.toolbarActions { display: flex; gap: 8px; }
+.rowCheck { width: 24px; text-align: center; input { cursor: pointer; } }
+.filterBar { display: grid; grid-template-columns: minmax(220px, 2fr) repeat(3, minmax(130px, 1fr)); gap: 8px; align-items: center; > * { min-width: 0; } }
 .empty { height: 220px; display: flex; align-items: center; justify-content: center; color: var(--color-font-label); font-size: 18px; }
 .settings { max-width: 760px; display: flex; flex-direction: column; gap: 14px; label { display: grid; grid-template-columns: 190px 1fr; align-items: center; gap: 12px; > span { color: var(--color-font-label); } > :global(ul) { padding: 0; gap: 16px; } } > p { color: var(--color-font-label); font-size: 12px; } }
 .settingsActions { display: flex; gap: 10px; padding-left: 202px; }
 .calibrationGrid { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; label { display: grid; grid-template-columns: 120px 1fr; align-items: center; gap: 12px; > span { color: var(--color-font-label); } } }
-@media (max-width: 900px) { .cards { grid-template-columns: repeat(3, 1fr); } .formRow { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 900px) { .cards { grid-template-columns: repeat(3, 1fr); } .formRow, .editRow, .filterBar { grid-template-columns: 1fr 1fr; } }
 </style>

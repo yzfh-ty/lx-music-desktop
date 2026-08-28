@@ -203,6 +203,7 @@ export const copySubscriptionFileToCd2 = async(input: {
   config: LX.Subscription.Config
   localPath: string
   currentCloudPath: string | null
+  retryCloudPath?: string | null
 }): Promise<LX.Subscription.Cd2CopyResult> => {
   const localPath = path.resolve(input.localPath)
   const localStat = await fs.promises.stat(localPath).catch(() => null)
@@ -216,12 +217,22 @@ export const copySubscriptionFileToCd2 = async(input: {
     if (currentPath && !isWithin(connection.mountedRoot.rootPath, currentPath)) {
       throw new Error('数据库中的现有云端路径超出当前 CD2 音乐库根目录')
     }
+    const retryPath = input.retryCloudPath ? path.resolve(input.retryCloudPath) : null
+    if (retryPath && !isWithin(connection.mountedRoot.rootPath, retryPath)) {
+      throw new Error('待重试的 CD2 目标路径超出音乐库根目录')
+    }
+    const retryName = retryPath ? path.basename(retryPath) : ''
+    const localName = path.basename(localPath)
+    if (retryPath && (process.platform == 'win32' ? retryName.toLowerCase() != localName.toLowerCase() : retryName != localName)) {
+      throw new Error('待重试的 CD2 目标文件名与本地成品不一致')
+    }
     const sameExtension = currentPath && path.extname(currentPath).toLowerCase() == path.extname(localPath).toLowerCase()
-    const cloudPath = sameExtension ? currentPath : path.join(connection.mountedRoot.rootPath, path.basename(localPath))
+    const cloudPath = sameExtension ? currentPath : retryPath ?? path.join(connection.mountedRoot.rootPath, path.basename(localPath))
     if (!isWithin(connection.mountedRoot.rootPath, cloudPath)) throw new Error('目标云端路径超出 CD2 音乐库根目录')
     if (!sameExtension) {
       const existingTarget = await fs.promises.stat(cloudPath).catch(() => null)
-      if (existingTarget) throw new Error('CD2 目标路径已存在且不属于当前歌曲记录，拒绝覆盖')
+      const isKnownRetryTarget = retryPath && comparablePath(retryPath) == comparablePath(cloudPath)
+      if (existingTarget && !isKnownRetryTarget) throw new Error('CD2 目标路径已存在且不属于当前歌曲记录，拒绝覆盖')
     }
     const localLrcPath = lrcPathFor(localPath)
     const cloudLrcPath = lrcPathFor(cloudPath)

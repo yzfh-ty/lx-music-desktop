@@ -930,6 +930,15 @@ export const getSubscriptionCalibrationRecords = async(): Promise<LX.Subscriptio
 export const confirmSubscriptionCalibration = async(input: LX.Subscription.CalibrationConfirmInput): Promise<LX.Subscription.CalibrationRecord> => {
   return rendererInvoke<LX.Subscription.CalibrationConfirmInput, LX.Subscription.CalibrationRecord>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_calibration_confirm, input)
 }
+export const scanSubscriptionStructure = async(input: LX.Subscription.StructureValidationInput): Promise<LX.Subscription.StructureValidationSummary> => {
+  return rendererInvoke<LX.Subscription.StructureValidationInput, LX.Subscription.StructureValidationSummary>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_structure_scan, input)
+}
+export const getSubscriptionStructureValidationRecords = async(): Promise<LX.Subscription.StructureValidationRecord[]> => {
+  return rendererInvoke<LX.Subscription.StructureValidationRecord[]>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_structure_get)
+}
+export const backupSubscriptionDatabase = async(): Promise<LX.Subscription.BackupResult> => {
+  return rendererInvoke<LX.Subscription.BackupResult>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_backup_create)
+}
 export const getSubscriptionHistory = async(limit = 500): Promise<LX.Subscription.HistoryItem[]> => {
   return rendererInvoke<number, LX.Subscription.HistoryItem[]>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_history_get, limit)
 }

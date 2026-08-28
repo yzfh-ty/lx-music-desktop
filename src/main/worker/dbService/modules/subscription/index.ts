@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import path from 'node:path'
 import { getDB } from '../../db'
 
 const QUALITY_RANK: Record<LX.Subscription.Quality, number> = {
@@ -37,6 +38,13 @@ interface ConfigRow {
   calibration_include_paths: string
   calibration_exclude_paths: string
   calibration_completed_at: number | null
+  structure_root_path: string
+  structure_recursive: number
+  structure_interval_minutes: number | null
+  structure_last_run_at: number | null
+  backup_interval_minutes: number | null
+  backup_last_at: number | null
+  backup_last_path: string
   created_at: number
   updated_at: number
 }
@@ -121,6 +129,13 @@ const toConfig = (row: ConfigRow): LX.Subscription.Config => ({
   calibrationIncludePaths: JSON.parse(row.calibration_include_paths) as string[],
   calibrationExcludePaths: JSON.parse(row.calibration_exclude_paths) as string[],
   calibrationCompletedAt: row.calibration_completed_at,
+  structureRootPath: row.structure_root_path,
+  structureRecursive: row.structure_recursive == 1,
+  structureIntervalMinutes: row.structure_interval_minutes,
+  structureLastRunAt: row.structure_last_run_at,
+  backupIntervalMinutes: row.backup_interval_minutes,
+  backupLastAt: row.backup_last_at,
+  backupLastPath: row.backup_last_path,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 })
@@ -186,6 +201,12 @@ export const getSubscriptionConfig = (): LX.Subscription.Config => toConfig(getC
 export const updateSubscriptionConfig = (input: LX.Subscription.ConfigUpdate): LX.Subscription.Config => {
   const current = getSubscriptionConfig()
   const next = { ...current, ...input, updatedAt: Date.now() }
+  if (next.structureIntervalMinutes != null && (!Number.isInteger(next.structureIntervalMinutes) || next.structureIntervalMinutes <= 0)) {
+    throw new Error('目录校验周期必须是正整数分钟')
+  }
+  if (next.backupIntervalMinutes != null && (!Number.isInteger(next.backupIntervalMinutes) || next.backupIntervalMinutes <= 0)) {
+    throw new Error('数据库备份周期必须是正整数分钟')
+  }
   getDB().prepare(`
     UPDATE subscription_config SET
       stop_quality = @stopQuality,
@@ -201,6 +222,13 @@ export const updateSubscriptionConfig = (input: LX.Subscription.ConfigUpdate): L
       calibration_include_paths = @calibrationIncludePaths,
       calibration_exclude_paths = @calibrationExcludePaths,
       calibration_completed_at = @calibrationCompletedAt,
+      structure_root_path = @structureRootPath,
+      structure_recursive = @structureRecursive,
+      structure_interval_minutes = @structureIntervalMinutes,
+      structure_last_run_at = @structureLastRunAt,
+      backup_interval_minutes = @backupIntervalMinutes,
+      backup_last_at = @backupLastAt,
+      backup_last_path = @backupLastPath,
       updated_at = @updatedAt
     WHERE id = 1
   `).run({
@@ -208,6 +236,7 @@ export const updateSubscriptionConfig = (input: LX.Subscription.ConfigUpdate): L
     syncToCd2: next.syncToCd2 ? 1 : 0,
     diskLocked: next.diskLocked ? 1 : 0,
     calibrationRecursive: next.calibrationRecursive ? 1 : 0,
+    structureRecursive: next.structureRecursive ? 1 : 0,
     calibrationIncludePaths: JSON.stringify(next.calibrationIncludePaths),
     calibrationExcludePaths: JSON.stringify(next.calibrationExcludePaths),
   })
@@ -338,7 +367,7 @@ const applyCalibrationMatch = (
     UPDATE subscription_task SET status = 'uploaded', cloud_path = ?, old_cloud_path = NULL,
       local_path = NULL, file_verified_quality = ?, failure_reason = NULL,
       cleanup_at = NULL, upload_completed_at = ?, progress = 100, speed = '', updated_at = ?
-    WHERE music_key = ? AND status IN ('discovered', 'pending', 'disk_paused', 'failed', 'quality_skipped', 'uploaded')
+    WHERE music_key = ? AND status IN ('discovered', 'pending', 'disk_paused', 'failed', 'quality_skipped', 'calibration_unresolved', 'uploaded')
   `).run(file.filePath, file.quality, confirmedAt, confirmedAt, musicKey)
 }
 
@@ -363,11 +392,10 @@ export const importSubscriptionCalibration = (files: LX.Subscription.Calibration
         .map(item => item.music_key)
     return { file, candidates }
   })
-  const uniqueKeyCount = new Map<string, number>()
+  const candidateFileCount = new Map<string, number>()
   for (const item of prepared) {
-    if (!item.file.error && item.file.quality && item.candidates.length == 1) {
-      uniqueKeyCount.set(item.candidates[0], (uniqueKeyCount.get(item.candidates[0]) ?? 0) + 1)
-    }
+    if (item.file.error != null || item.file.quality == null) continue
+    for (const musicKey of item.candidates) candidateFileCount.set(musicKey, (candidateFileCount.get(musicKey) ?? 0) + 1)
   }
   const summary: LX.Subscription.CalibrationSummary = { scanned: files.length, matched: 0, unresolved: 0, failed: 0 }
   const upsert = db.prepare(`
@@ -382,6 +410,14 @@ export const importSubscriptionCalibration = (files: LX.Subscription.Calibration
       scanned_at = excluded.scanned_at, confirmed_at = excluded.confirmed_at
   `)
   db.transaction(() => {
+    db.prepare(`
+      UPDATE subscription_library SET calibration_status = NULL, updated_at = ?
+      WHERE calibration_status = 'calibration_unresolved'
+    `).run(scannedAt)
+    db.prepare(`
+      UPDATE subscription_task SET status = 'pending', failure_reason = NULL, updated_at = ?
+      WHERE status = 'calibration_unresolved'
+    `).run(scannedAt)
     for (const { file, candidates } of prepared) {
       let status: CalibrationRow['status']
       let error = file.error
@@ -396,9 +432,9 @@ export const importSubscriptionCalibration = (files: LX.Subscription.Calibration
         status = 'unresolved'
         error = '缺少歌名、歌手或时长标签'
         summary.unresolved++
-      } else if (candidates.length != 1 || uniqueKeyCount.get(candidates[0]) != 1) {
+      } else if (candidates.length != 1 || candidateFileCount.get(candidates[0]) != 1) {
         status = 'unresolved'
-        error = candidates.length > 1 || (candidates.length == 1 && uniqueKeyCount.get(candidates[0]) != 1)
+        error = candidates.length > 1 || (candidates.length == 1 && candidateFileCount.get(candidates[0]) != 1)
           ? '匹配到多个候选或同一歌曲对应多个文件'
           : '未找到可唯一关联的订阅歌曲'
         summary.unresolved++
@@ -410,6 +446,20 @@ export const importSubscriptionCalibration = (files: LX.Subscription.Calibration
       }
       upsert.run(file.filePath, file.title, file.artist, file.duration, file.quality,
         status, JSON.stringify(candidates), error, scannedAt, status == 'matched' ? scannedAt : null)
+      if (status == 'unresolved' && candidates.length) {
+        const reason = `云端校准尚未解决：${file.filePath}`
+        for (const musicKey of candidates) {
+          db.prepare(`
+            UPDATE subscription_library SET calibration_status = 'calibration_unresolved', updated_at = ?
+            WHERE music_key = ?
+          `).run(scannedAt, musicKey)
+          db.prepare(`
+            UPDATE subscription_task SET status = 'calibration_unresolved', failure_reason = ?,
+              progress = 0, speed = '', updated_at = ?
+            WHERE music_key = ? AND status NOT IN ('uploading', 'old_version_cleanup', 'cleanup_wait', 'local_completed')
+          `).run(reason, scannedAt, musicKey)
+        }
+      }
     }
     db.prepare('UPDATE subscription_config SET calibration_completed_at = ?, updated_at = ? WHERE id = 1').run(scannedAt, scannedAt)
   })()
@@ -431,11 +481,34 @@ export const confirmSubscriptionCalibration = (input: LX.Subscription.Calibratio
   const record = toCalibrationRecord(row)
   const confirmedAt = Date.now()
   db.transaction(() => {
+    const existing = db.prepare('SELECT cloud_path, record_origin FROM subscription_library WHERE music_key = ?').get(input.musicKey) as {
+      cloud_path: string | null
+      record_origin: string | null
+    } | undefined
+    if (!existing) throw new Error('人工确认的歌曲键不存在于订阅音乐库')
+    if (existing.cloud_path && existing.cloud_path != record.filePath && existing.record_origin == 'calibrated') {
+      throw new Error('该歌曲已关联另一个校准文件，请先处理重复关联')
+    }
     applyCalibrationMatch(input.musicKey, record, confirmedAt)
     db.prepare(`
       UPDATE subscription_calibration SET status = 'matched', candidate_music_keys = ?,
         error = NULL, confirmed_at = ? WHERE id = ?
     `).run(JSON.stringify([input.musicKey]), confirmedAt, input.recordId)
+    for (const musicKey of record.candidateMusicKeys.filter(key => key != input.musicKey)) {
+      const stillUnresolved = db.prepare(`
+        SELECT 1 FROM subscription_calibration c, json_each(c.candidate_music_keys)
+        WHERE c.status = 'unresolved' AND json_each.value = ? LIMIT 1
+      `).get(musicKey)
+      if (stillUnresolved) continue
+      db.prepare(`
+        UPDATE subscription_library SET calibration_status = NULL, updated_at = ?
+        WHERE music_key = ? AND calibration_status = 'calibration_unresolved'
+      `).run(confirmedAt, musicKey)
+      db.prepare(`
+        UPDATE subscription_task SET status = 'pending', failure_reason = NULL, updated_at = ?
+        WHERE music_key = ? AND status = 'calibration_unresolved'
+      `).run(confirmedAt, musicKey)
+    }
   })()
   return getSubscriptionCalibrationRecords().find(item => item.id == input.recordId)!
 }
@@ -518,7 +591,8 @@ export const ingestSubscriptionSync = (input: LX.Subscription.SyncInput): LX.Sub
       saveRelation.run({ subscriptionId: input.subscriptionId, musicKey, now: input.syncedAt })
 
       const task = findTask.get(musicKey) as { status: LX.Subscription.TaskStatus } | undefined
-      const hasUnknownCloudQuality = library.cloud_path != null && (library.cloud_quality == null || library.calibration_status == 'calibration_unresolved')
+      const hasUnknownCloudQuality = library.calibration_status == 'calibration_unresolved' ||
+        (library.cloud_path != null && library.cloud_quality == null)
       if (hasUnknownCloudQuality || isSatisfied(library.cloud_quality, config.stopQuality) || task?.status == 'failed') {
         result.skipped++
         continue
@@ -528,7 +602,7 @@ export const ingestSubscriptionSync = (input: LX.Subscription.SyncInput): LX.Sub
         insertTask.run({ id: taskId, musicKey, subscriptionId: input.subscriptionId, status: 'pending', now: input.syncedAt })
         history.run(taskId, musicKey, 'pending', '歌单同步发现歌曲', input.syncedAt)
         result.queued++
-      } else if (task.status == 'uploaded') {
+      } else if (['uploaded', 'discovered', 'quality_skipped'].includes(task.status)) {
         resetUploadedTask.run({ musicKey, subscriptionId: input.subscriptionId, now: input.syncedAt })
         history.run(db.prepare('SELECT id FROM subscription_task WHERE music_key = ?').pluck().get(musicKey), musicKey, 'pending', '发现潜在音质升级', input.syncedAt)
         result.queued++
@@ -617,7 +691,6 @@ export const retrySubscriptionTasks = (ids: string[]): number => {
     const update = db.prepare(`
       UPDATE subscription_task SET status = CASE
           WHEN upload_completed_at IS NOT NULL AND old_cloud_path IS NOT NULL THEN 'old_version_cleanup'
-          WHEN local_path IS NOT NULL AND file_verified_quality IS NOT NULL AND cloud_path IS NOT NULL THEN 'uploading'
           WHEN local_path IS NOT NULL AND file_verified_quality IS NOT NULL THEN 'tagging'
           WHEN local_path IS NOT NULL THEN 'quality_check'
           ELSE 'pending'
@@ -697,7 +770,7 @@ export const getSubscriptionDashboard = (): LX.Subscription.Dashboard => {
 export const getSubscriptionHistory = (limit = 500): LX.Subscription.HistoryItem[] => {
   const safeLimit = Math.max(1, Math.min(2_000, Math.trunc(limit)))
   const rows = getDB().prepare(`
-    SELECT h.*, l.name, l.singer
+    SELECT h.*, l.name, l.singer, l.source
     FROM subscription_history h
     JOIN subscription_library l ON l.music_key = h.music_key
     ORDER BY h.created_at DESC, h.id DESC
@@ -708,20 +781,103 @@ export const getSubscriptionHistory = (limit = 500): LX.Subscription.HistoryItem
     music_key: string
     name: string
     singer: string
+    source: LX.OnlineSource
     status: LX.Subscription.TaskStatus
     message: string | null
     snapshot: string | null
     created_at: number
   }>
+  return rows.map(row => {
+    const snapshot = row.snapshot ? JSON.parse(row.snapshot) as Record<string, unknown> : null
+    const quality = (key: string) => {
+      const value = snapshot?.[key]
+      return ['128k', '320k', 'flac', 'flac24bit'].includes(String(value)) ? value as LX.Subscription.Quality : null
+    }
+    return {
+      id: row.id,
+      taskId: row.task_id,
+      musicKey: row.music_key,
+      name: row.name,
+      singer: row.singer,
+      source: row.source,
+      status: row.status,
+      message: row.message,
+      snapshot,
+      requestedQuality: quality('requestedQuality'),
+      sourceReportedQuality: quality('sourceReportedQuality'),
+      fileVerifiedQuality: quality('fileVerifiedQuality'),
+      cloudQuality: quality('cloudQuality'),
+      createdAt: row.created_at,
+    }
+  })
+}
+
+const comparablePath = (input: string) => {
+  const resolved = path.resolve(input).replace(/[\\/]+$/, '')
+  return process.platform == 'win32' ? resolved.toLowerCase() : resolved
+}
+
+const isPathInScope = (rootPath: string, targetPath: string, recursive: boolean) => {
+  const root = comparablePath(rootPath)
+  const target = comparablePath(targetPath)
+  return recursive ? target.startsWith(`${root}${path.sep}`) : comparablePath(path.dirname(target)) == root
+}
+
+export const importSubscriptionStructureValidation = (input: LX.Subscription.StructureValidationImport): LX.Subscription.StructureValidationSummary => {
+  const rootPath = path.resolve(input.rootPath)
+  const files = Array.from(new Set(input.files.map(filePath => path.resolve(filePath))))
+  const fileKeys = new Set(files.map(comparablePath))
+  const tracked = getDB().prepare(`
+    SELECT music_key, cloud_path
+    FROM subscription_library
+    WHERE cloud_path IS NOT NULL AND cloud_path != ''
+  `).all() as Array<{ music_key: string, cloud_path: string }>
+  const scopedTracked = tracked.filter(item => isPathInScope(rootPath, item.cloud_path, input.recursive))
+  const trackedByPath = new Map(scopedTracked.map(item => [comparablePath(item.cloud_path), item]))
+  const missing = scopedTracked.filter(item => !fileKeys.has(comparablePath(item.cloud_path)))
+  const untracked = files.filter(filePath => !trackedByPath.has(comparablePath(filePath)))
+  const present = scopedTracked.length - missing.length
+  const db = getDB()
+  db.transaction(() => {
+    db.prepare('DELETE FROM subscription_structure_issue').run()
+    const insert = db.prepare(`
+      INSERT INTO subscription_structure_issue (kind, file_path, music_key, scanned_at)
+      VALUES (?, ?, ?, ?)
+    `)
+    for (const item of missing) insert.run('missing', path.resolve(item.cloud_path), item.music_key, input.scannedAt)
+    for (const filePath of untracked) insert.run('untracked', filePath, null, input.scannedAt)
+    db.prepare('UPDATE subscription_config SET structure_last_run_at = ?, updated_at = ? WHERE id = 1')
+      .run(input.scannedAt, input.scannedAt)
+  })()
+  return { scanned: files.length, present, missing: missing.length, untracked: untracked.length, scannedAt: input.scannedAt }
+}
+
+export const getSubscriptionStructureValidationRecords = (): LX.Subscription.StructureValidationRecord[] => {
+  const rows = getDB().prepare(`
+    SELECT id, kind, file_path, music_key, scanned_at
+    FROM subscription_structure_issue
+    ORDER BY kind, file_path
+  `).all() as Array<{
+    id: number
+    kind: LX.Subscription.StructureValidationRecord['kind']
+    file_path: string
+    music_key: string | null
+    scanned_at: number
+  }>
   return rows.map(row => ({
     id: row.id,
-    taskId: row.task_id,
+    kind: row.kind,
+    filePath: row.file_path,
     musicKey: row.music_key,
-    name: row.name,
-    singer: row.singer,
-    status: row.status,
-    message: row.message,
-    snapshot: row.snapshot ? JSON.parse(row.snapshot) as Record<string, unknown> : null,
-    createdAt: row.created_at,
+    scannedAt: row.scanned_at,
   }))
+}
+
+export const backupSubscriptionDatabase = async(destination: string): Promise<LX.Subscription.BackupResult> => {
+  const backupPath = path.resolve(destination)
+  await getDB().backup(backupPath)
+  const createdAt = Date.now()
+  getDB().prepare('UPDATE subscription_config SET backup_last_at = ?, backup_last_path = ?, updated_at = ? WHERE id = 1')
+    .run(createdAt, backupPath, createdAt)
+  return { path: backupPath, createdAt }
 }

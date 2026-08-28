@@ -178,6 +178,9 @@ const modules = {
     subscription_calibration_scan: 'subscription_calibration_scan',
     subscription_calibration_get: 'subscription_calibration_get',
     subscription_calibration_confirm: 'subscription_calibration_confirm',
+    subscription_structure_scan: 'subscription_structure_scan',
+    subscription_structure_get: 'subscription_structure_get',
+    subscription_backup_create: 'subscription_backup_create',
     subscription_history_get: 'subscription_history_get',
   },
   winLyric: {

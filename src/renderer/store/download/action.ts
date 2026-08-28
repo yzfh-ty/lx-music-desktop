@@ -228,9 +228,22 @@ const removeSubscriptionDownloadEntry = async(downloadInfo: LX.Download.ListItem
   void checkStartTask()
 }
 
-const skipSubscriptionDownload = async(downloadInfo: LX.Download.ListItem, reason: string) => {
+const markSubscriptionDownloadSkipped = async(downloadInfo: LX.Download.ListItem, reason: string) => {
   const taskId = downloadInfo.metadata.subscriptionTaskId
-  if (taskId) await updateSubscriptionTask({ id: taskId, status: 'quality_skipped', failureReason: reason, speed: '', progress: 0 })
+  if (taskId) {
+    const task = (await getSubscriptionTasks()).find(item => item.id == taskId)
+    await updateSubscriptionTask({
+      id: taskId,
+      status: task?.cloudQuality || task?.existingCloudPath ? 'uploaded' : 'discovered',
+      failureReason: reason,
+      speed: '',
+      progress: 0,
+    })
+  }
+}
+
+const skipSubscriptionDownload = async(downloadInfo: LX.Download.ListItem, reason: string) => {
+  await markSubscriptionDownloadSkipped(downloadInfo, reason)
   await removeSubscriptionDownloadEntry(downloadInfo)
 }
 
@@ -245,23 +258,20 @@ const getUrl = async(downloadInfo: LX.Download.ListItem, isRefresh: boolean = fa
     })
     const report = result.detail.sourceReportedQuality
     if (!report) {
-      await updateSubscriptionTask({ id: taskId, status: 'quality_skipped', failureReason: '音源未报告可确认的实际音质' })
+      await markSubscriptionDownloadSkipped(downloadInfo, '音源未报告可确认的实际音质')
       return subscriptionSkipToken
     }
     const task = (await getSubscriptionTasks()).find(item => item.id == taskId)
     if (task?.cloudQuality && qualityRank[report] <= qualityRank[task.cloudQuality]) {
-      await updateSubscriptionTask({
-        id: taskId,
-        status: 'quality_skipped',
-        sourceReportedQuality: report,
-        failureReason: `音源报告音质 ${report} 未高于云端音质 ${task.cloudQuality}`,
-      })
+      await updateSubscriptionTask({ id: taskId, sourceReportedQuality: report })
+      await markSubscriptionDownloadSkipped(downloadInfo, `音源报告音质 ${report} 未高于云端音质 ${task.cloudQuality}`)
       return subscriptionSkipToken
     }
     await updateSubscriptionTask({
       id: taskId,
       status: 'downloading',
       sourceReportedQuality: report,
+      sourceUsed: appSetting['common.apiSource'],
       actualSource: result.musicInfo.source,
       actualSongId: result.musicInfo.id,
       failureReason: null,
@@ -337,7 +347,7 @@ const handleError = (downloadInfo: LX.Download.ListItem, message?: string) => {
   void checkStartTask()
 }
 
-export const resumeSubscriptionPostProcess = async(downloadInfo: LX.Download.ListItem) => {
+export const resumeSubscriptionPostProcess = async(downloadInfo: LX.Download.ListItem, ignoreUnsupportedMetadata = false) => {
   const taskId = downloadInfo.metadata.subscriptionTaskId!
   try {
     await updateSubscriptionTask({ id: taskId, status: 'quality_check', localPath: downloadInfo.metadata.filePath, downloadCompletedAt: Date.now(), progress: 100, speed: '' })
@@ -364,8 +374,11 @@ export const resumeSubscriptionPostProcess = async(downloadInfo: LX.Download.Lis
       await skipSubscriptionDownload(downloadInfo, `本地复核音质 ${inspection.quality} 未高于云端音质 ${task.cloudQuality}`)
       return
     }
+    if (!ignoreUnsupportedMetadata && !['mp3', 'flac'].includes(downloadInfo.metadata.ext)) {
+      throw new Error(`当前 ${downloadInfo.metadata.ext.toUpperCase()} 格式不支持内嵌订阅所需的完整元数据，未上传到 CD2`)
+    }
     await updateSubscriptionTask({ id: taskId, status: 'tagging', fileVerifiedQuality: inspection.quality })
-    await saveMeta(downloadInfo)
+    if (!ignoreUnsupportedMetadata) await saveMeta(downloadInfo)
     await downloadLyric(downloadInfo)
     await updateSubscriptionTask({ id: taskId, localPath: downloadInfo.metadata.filePath })
     const finalTask = await copySubscriptionToCd2(taskId)
@@ -380,10 +393,10 @@ export const resumeSubscriptionPostProcess = async(downloadInfo: LX.Download.Lis
   }
 }
 
-export const resumeSubscriptionTaskPostProcess = async(task: LX.Subscription.Task) => {
+export const resumeSubscriptionTaskPostProcess = async(task: LX.Subscription.Task, ignoreUnsupportedMetadata = false) => {
   if (!task.localPath) throw new Error('订阅后处理任务缺少本地文件路径')
   const existing = downloadList.find(item => item.metadata.subscriptionTaskId == task.id && item.metadata.filePath)
-  if (existing) return resumeSubscriptionPostProcess(existing)
+  if (existing) return resumeSubscriptionPostProcess(existing, ignoreUnsupportedMetadata)
   const fileName = task.localPath.split(/[\\/]/).pop() ?? `${task.name}.mp3`
   const extension = fileName.split('.').pop()?.toLowerCase()
   if (!['mp3', 'flac', 'wav', 'ape'].includes(extension ?? '')) throw new Error('订阅后处理任务的本地文件扩展名不受支持')
@@ -407,7 +420,7 @@ export const resumeSubscriptionTaskPostProcess = async(task: LX.Subscription.Tas
       subscriptionTaskId: task.id,
     },
   }
-  return resumeSubscriptionPostProcess(downloadInfo)
+  return resumeSubscriptionPostProcess(downloadInfo, ignoreUnsupportedMetadata)
 }
 
 const handleStartTask = async(downloadInfo: LX.Download.ListItem) => {

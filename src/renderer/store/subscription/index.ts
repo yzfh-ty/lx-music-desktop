@@ -2,6 +2,7 @@ import { reactive } from '@common/utils/vueTools'
 import { getListDetailAll as getSongListDetailAll } from '@renderer/store/songList/action'
 import { getListDetailAll as getBoardListDetailAll } from '@renderer/store/leaderboard/action'
 import {
+  backupSubscriptionDatabase,
   createSubscription as createSubscriptionRemote,
   cleanupSubscriptionLocalFile,
   checkSubscriptionCd2Health,
@@ -14,6 +15,7 @@ import {
   getSubscriptionDashboard,
   getSubscriptionDiskInfo,
   getSubscriptionHistory,
+  getSubscriptionStructureValidationRecords,
   getSubscriptionTasks,
   getSubscriptions,
   ingestSubscriptionSync,
@@ -21,6 +23,7 @@ import {
   removeSubscription as removeSubscriptionRemote,
   retrySubscriptionTasks,
   scanSubscriptionCalibration,
+  scanSubscriptionStructure,
   setSubscriptionSyncError,
   updateSubscription as updateSubscriptionRemote,
   updateSubscriptionConfig as updateSubscriptionConfigRemote,
@@ -46,6 +49,7 @@ export const subscriptionState = reactive<{
   cd2Health: LX.Subscription.Cd2Health | null
   cd2HealthError: string
   calibrationRecords: LX.Subscription.CalibrationRecord[]
+  structureRecords: LX.Subscription.StructureValidationRecord[]
   history: LX.Subscription.HistoryItem[]
   loading: boolean
   syncingIds: string[]
@@ -58,6 +62,7 @@ export const subscriptionState = reactive<{
   cd2Health: null,
   cd2HealthError: '',
   calibrationRecords: [],
+  structureRecords: [],
   history: [],
   loading: false,
   syncingIds: [],
@@ -71,12 +76,13 @@ const parseDuration = (interval?: string | null) => {
 }
 
 export const refreshSubscriptionState = async() => {
-  const [config, subscriptions, tasks, dashboard, calibrationRecords, history] = await Promise.all([
+  const [config, subscriptions, tasks, dashboard, calibrationRecords, structureRecords, history] = await Promise.all([
     getSubscriptionConfig(),
     getSubscriptions(),
     getSubscriptionTasks(),
     getSubscriptionDashboard(),
     getSubscriptionCalibrationRecords(),
+    getSubscriptionStructureValidationRecords(),
     getSubscriptionHistory(),
   ])
   subscriptionState.config = config
@@ -84,6 +90,7 @@ export const refreshSubscriptionState = async() => {
   subscriptionState.tasks = tasks
   subscriptionState.dashboard = dashboard
   subscriptionState.calibrationRecords = calibrationRecords
+  subscriptionState.structureRecords = structureRecords
   subscriptionState.history = history
 }
 
@@ -155,6 +162,18 @@ export const resolveSubscriptionCalibration = async(input: LX.Subscription.Calib
   await refreshSubscriptionState()
 }
 
+export const runSubscriptionStructureValidation = async(input: LX.Subscription.StructureValidationInput) => {
+  const summary = await scanSubscriptionStructure(input)
+  await refreshSubscriptionState()
+  return summary
+}
+
+export const runSubscriptionBackup = async() => {
+  const result = await backupSubscriptionDatabase()
+  subscriptionState.config = await getSubscriptionConfig()
+  return result
+}
+
 export const syncSubscription = async(item: LX.Subscription.ListItem) => {
   if (subscriptionState.syncingIds.includes(item.id)) return null
   subscriptionState.syncingIds.push(item.id)
@@ -205,6 +224,26 @@ export const retryTasks = async(ids: string[]) => {
   void processSubscriptionQueue()
   void processSubscriptionMaintenance()
   return count
+}
+
+export const uploadLocalCompletedTask = async(task: LX.Subscription.Task) => {
+  const config = subscriptionState.config ?? await getSubscriptionConfig()
+  if (!config.syncToCd2) throw new Error('请先开启“下载完成后同步到 CD2”')
+  if (task.status != 'local_completed' || !task.localPath) throw new Error('该任务不是可手动上传的仅本地成品')
+  await updateSubscriptionTask({ id: task.id, status: 'tagging', failureReason: null })
+  await resumeSubscriptionTaskPostProcess({ ...task, status: 'tagging' })
+  await refreshSubscriptionState()
+  const updated = subscriptionState.tasks.find(item => item.id == task.id)
+  if (updated?.status == 'failed') throw new Error(updated.failureReason || '本地成品上传失败')
+}
+
+export const ignoreTaskMetadataAndUpload = async(task: LX.Subscription.Task) => {
+  if (task.status != 'failed' || !task.localPath) throw new Error('该任务不能忽略元数据步骤')
+  await updateSubscriptionTask({ id: task.id, status: 'tagging', failureReason: '用户已明确选择忽略不支持的元数据内嵌' })
+  await resumeSubscriptionTaskPostProcess({ ...task, status: 'tagging' }, true)
+  await refreshSubscriptionState()
+  const updated = subscriptionState.tasks.find(item => item.id == task.id)
+  if (updated?.status == 'failed') throw new Error(updated.failureReason || '忽略元数据后的上传处理失败')
 }
 
 export const unlockDiskQueue = async() => {
@@ -390,6 +429,8 @@ export const pauseTask = async(task: LX.Subscription.Task) => {
 }
 
 export const resumeTask = async(task: LX.Subscription.Task) => {
+  const config = subscriptionState.config ?? await getSubscriptionConfig()
+  if (config.diskLocked) throw new Error('本地磁盘保护仍处于锁定状态，请先使用“手动恢复”解除全局锁定')
   await updateSubscriptionTask({ id: task.id, status: 'pending', failureReason: null })
   const downloadInfo = downloadList.find(item => item.metadata.subscriptionTaskId == task.id)
   if (downloadInfo) await startDownloadTasks([downloadInfo])
@@ -400,6 +441,8 @@ export const resumeTask = async(task: LX.Subscription.Task) => {
 let schedulerTimer: ReturnType<typeof setInterval> | null = null
 let maintenanceTimer: ReturnType<typeof setInterval> | null = null
 let schedulerRunning = false
+let structureValidationRunning = false
+let backupRunning = false
 
 const runDueSubscriptions = async() => {
   if (schedulerRunning) return
@@ -414,6 +457,45 @@ const runDueSubscriptions = async() => {
   } finally {
     // eslint-disable-next-line require-atomic-updates
     schedulerRunning = false
+  }
+}
+
+const runDueStructureValidation = async() => {
+  if (structureValidationRunning) return
+  const config = subscriptionState.config ?? await getSubscriptionConfig()
+  const interval = config.structureIntervalMinutes
+  if (!config.syncToCd2 || interval == null || !config.structureRootPath.trim()) return
+  if (config.structureLastRunAt != null && Date.now() - config.structureLastRunAt < interval * 60_000) return
+  // eslint-disable-next-line require-atomic-updates
+  structureValidationRunning = true
+  try {
+    await runSubscriptionStructureValidation({
+      rootPath: config.structureRootPath,
+      recursive: config.structureRecursive,
+    })
+  } catch (err) {
+    console.error('Subscription structure validation failed:', err)
+  } finally {
+    // eslint-disable-next-line require-atomic-updates
+    structureValidationRunning = false
+  }
+}
+
+const runDueSubscriptionBackup = async() => {
+  if (backupRunning) return
+  const config = subscriptionState.config ?? await getSubscriptionConfig()
+  const interval = config.backupIntervalMinutes
+  if (!config.syncToCd2 || interval == null) return
+  if (config.backupLastAt != null && Date.now() - config.backupLastAt < interval * 60_000) return
+  // eslint-disable-next-line require-atomic-updates
+  backupRunning = true
+  try {
+    await runSubscriptionBackup()
+  } catch (err) {
+    console.error('Subscription database backup failed:', err)
+  } finally {
+    // eslint-disable-next-line require-atomic-updates
+    backupRunning = false
   }
 }
 
@@ -465,8 +547,12 @@ export const initSubscriptionService = async() => {
   await processSubscriptionQueue()
   await processSubscriptionMaintenance()
   await runDueSubscriptions()
+  await runDueStructureValidation()
+  await runDueSubscriptionBackup()
   schedulerTimer ??= setInterval(() => {
     void runDueSubscriptions()
+    void runDueStructureValidation()
+    void runDueSubscriptionBackup()
     void processSubscriptionQueue()
   }, 60_000)
   maintenanceTimer ??= setInterval(() => {
