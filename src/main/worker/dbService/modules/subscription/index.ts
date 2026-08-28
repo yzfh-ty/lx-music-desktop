@@ -77,6 +77,7 @@ interface TaskRow {
   progress: number
   speed: string
   failure_reason: string | null
+  pause_origin: LX.Subscription.PauseOrigin | null
   retry_count: number
   cleanup_at: number | null
   discovered_at: number
@@ -167,6 +168,7 @@ const toTask = (row: TaskRow): LX.Subscription.Task => ({
   progress: row.progress,
   speed: row.speed,
   failureReason: row.failure_reason,
+  pauseOrigin: row.pause_origin,
   retryCount: row.retry_count,
   cleanupAt: row.cleanup_at,
   discoveredAt: row.discovered_at,
@@ -207,8 +209,10 @@ export const updateSubscriptionConfig = (input: LX.Subscription.ConfigUpdate): L
   if (next.backupIntervalMinutes != null && (!Number.isInteger(next.backupIntervalMinutes) || next.backupIntervalMinutes <= 0)) {
     throw new Error('数据库备份周期必须是正整数分钟')
   }
-  getDB().prepare(`
-    UPDATE subscription_config SET
+  const db = getDB()
+  db.transaction(() => {
+    db.prepare(`
+      UPDATE subscription_config SET
       stop_quality = @stopQuality,
       cd2_root_path = @cd2RootPath,
       cd2_grpc_url = @cd2GrpcUrl,
@@ -230,16 +234,29 @@ export const updateSubscriptionConfig = (input: LX.Subscription.ConfigUpdate): L
       backup_last_at = @backupLastAt,
       backup_last_path = @backupLastPath,
       updated_at = @updatedAt
-    WHERE id = 1
-  `).run({
-    ...next,
-    syncToCd2: next.syncToCd2 ? 1 : 0,
-    diskLocked: next.diskLocked ? 1 : 0,
-    calibrationRecursive: next.calibrationRecursive ? 1 : 0,
-    structureRecursive: next.structureRecursive ? 1 : 0,
-    calibrationIncludePaths: JSON.stringify(next.calibrationIncludePaths),
-    calibrationExcludePaths: JSON.stringify(next.calibrationExcludePaths),
-  })
+      WHERE id = 1
+    `).run({
+      ...next,
+      syncToCd2: next.syncToCd2 ? 1 : 0,
+      diskLocked: next.diskLocked ? 1 : 0,
+      calibrationRecursive: next.calibrationRecursive ? 1 : 0,
+      structureRecursive: next.structureRecursive ? 1 : 0,
+      calibrationIncludePaths: JSON.stringify(next.calibrationIncludePaths),
+      calibrationExcludePaths: JSON.stringify(next.calibrationExcludePaths),
+    })
+    if ('stopQuality' in input) {
+      db.prepare(`
+        UPDATE subscription_library SET
+          quality_satisfied = CASE
+            WHEN cloud_quality IS NULL OR @stopQuality = 'none' THEN 0
+            WHEN (CASE cloud_quality WHEN '128k' THEN 1 WHEN '320k' THEN 2 WHEN 'flac' THEN 3 WHEN 'flac24bit' THEN 4 ELSE 0 END)
+              >= (CASE @stopQuality WHEN '128k' THEN 1 WHEN '320k' THEN 2 WHEN 'flac' THEN 3 WHEN 'flac24bit' THEN 4 ELSE 99 END)
+              THEN 1 ELSE 0
+          END,
+          updated_at = @updatedAt
+      `).run({ stopQuality: next.stopQuality, updatedAt: next.updatedAt })
+    }
+  })()
   return getSubscriptionConfig()
 }
 
@@ -660,6 +677,7 @@ export const updateSubscriptionTask = (input: LX.Subscription.TaskUpdate): LX.Su
         local_path = @localPath, cloud_path = @cloudPath, old_cloud_path = @oldCloudPath,
         file_name_format = @fileNameFormat, upload_started_at = @uploadStartedAt,
         progress = @progress, speed = @speed, failure_reason = @failureReason,
+        pause_origin = @pauseOrigin,
         retry_count = @retryCount, cleanup_at = @cleanupAt,
         download_completed_at = @downloadCompletedAt, upload_completed_at = @uploadCompletedAt,
         updated_at = @updatedAt
@@ -694,7 +712,7 @@ export const retrySubscriptionTasks = (ids: string[]): number => {
           WHEN local_path IS NOT NULL AND file_verified_quality IS NOT NULL THEN 'tagging'
           WHEN local_path IS NOT NULL THEN 'quality_check'
           ELSE 'pending'
-        END, failure_reason = NULL,
+        END, failure_reason = NULL, pause_origin = NULL,
         progress = 0, speed = '', retry_count = retry_count + 1, updated_at = ?
       WHERE id = ? AND status = 'failed'
     `)

@@ -261,7 +261,7 @@ tables.set('subscription_config', `
     "structure_recursive" INTEGER NOT NULL DEFAULT 1,
     "structure_interval_minutes" INTEGER,
     "structure_last_run_at" INTEGER,
-    "backup_interval_minutes" INTEGER,
+    "backup_interval_minutes" INTEGER NOT NULL DEFAULT 1440,
     "backup_last_at" INTEGER,
     "backup_last_path" TEXT NOT NULL DEFAULT '',
     "created_at" INTEGER NOT NULL,
@@ -351,6 +351,7 @@ tables.set('subscription_task', `
     "progress" REAL NOT NULL DEFAULT 0,
     "speed" TEXT NOT NULL DEFAULT '',
     "failure_reason" TEXT,
+    "pause_origin" TEXT,
     "retry_count" INTEGER NOT NULL DEFAULT 0,
     "cleanup_at" INTEGER,
     "discovered_at" INTEGER NOT NULL,
@@ -429,4 +430,4 @@ tables.set('index_subscription_structure_issue_kind', `
 
 export default tables
 
-export const DB_VERSION = '10'
+export const DB_VERSION = '11'

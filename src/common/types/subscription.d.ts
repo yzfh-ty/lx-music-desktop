@@ -3,6 +3,7 @@ declare namespace LX {
     type Quality = '128k' | '320k' | 'flac' | 'flac24bit'
     type StopQuality = Quality | 'none'
     type ListType = 'board' | 'playlist'
+    type PauseOrigin = 'manual' | 'disk'
     type TaskStatus = 'discovered'
     | 'calibrating'
     | 'calibration_unresolved'
@@ -154,6 +155,7 @@ declare namespace LX {
       progress: number
       speed: string
       failureReason: string | null
+      pauseOrigin: PauseOrigin | null
       retryCount: number
       cleanupAt: number | null
       discoveredAt: number

@@ -248,8 +248,8 @@ export const ignoreTaskMetadataAndUpload = async(task: LX.Subscription.Task) => 
 
 export const unlockDiskQueue = async() => {
   await saveSubscriptionConfig({ diskLocked: false, diskPausedAt: null })
-  const paused = subscriptionState.tasks.filter(task => task.status == 'disk_paused')
-  for (const task of paused) await updateSubscriptionTask({ id: task.id, status: 'pending', failureReason: null })
+  const paused = subscriptionState.tasks.filter(task => task.status == 'disk_paused' && task.pauseOrigin == 'disk')
+  for (const task of paused) await updateSubscriptionTask({ id: task.id, status: 'pending', pauseOrigin: null, failureReason: null })
   await refreshSubscriptionState()
   void processSubscriptionQueue()
 }
@@ -279,6 +279,7 @@ export const processSubscriptionQueue = async() => {
           await updateSubscriptionTask({
             id: item.id,
             status: 'disk_paused',
+            pauseOrigin: 'disk',
             failureReason: 'LX Music 下载目录与 CD2 音乐库重叠，请修改原版下载目录后手动恢复',
           })
         }
@@ -295,6 +296,7 @@ export const processSubscriptionQueue = async() => {
           await updateSubscriptionTask({
             id: item.id,
             status: 'disk_paused',
+            pauseOrigin: 'disk',
             failureReason: '本地下载磁盘剩余空间低于保护阈值',
           })
         }
@@ -424,14 +426,14 @@ export const processSubscriptionMaintenance = async() => {
 export const pauseTask = async(task: LX.Subscription.Task) => {
   const downloadInfo = downloadList.find(item => item.metadata.subscriptionTaskId == task.id)
   if (downloadInfo) await pauseDownloadTasks([downloadInfo])
-  await updateSubscriptionTask({ id: task.id, status: 'disk_paused' })
+  await updateSubscriptionTask({ id: task.id, status: 'disk_paused', pauseOrigin: 'manual', failureReason: '用户手动暂停' })
   await refreshSubscriptionState()
 }
 
 export const resumeTask = async(task: LX.Subscription.Task) => {
   const config = subscriptionState.config ?? await getSubscriptionConfig()
   if (config.diskLocked) throw new Error('本地磁盘保护仍处于锁定状态，请先使用“手动恢复”解除全局锁定')
-  await updateSubscriptionTask({ id: task.id, status: 'pending', failureReason: null })
+  await updateSubscriptionTask({ id: task.id, status: 'pending', pauseOrigin: null, failureReason: null })
   const downloadInfo = downloadList.find(item => item.metadata.subscriptionTaskId == task.id)
   if (downloadInfo) await startDownloadTasks([downloadInfo])
   await refreshSubscriptionState()

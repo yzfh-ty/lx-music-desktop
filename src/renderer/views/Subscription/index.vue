@@ -120,7 +120,7 @@
                   <small v-if="task.sourceUsed">音源 {{ task.sourceUsed }}</small>
                   <small v-if="task.actualSource">实际歌曲 {{ task.actualSource }}:{{ task.actualSongId }}</small>
                 </td>
-                <td><span :class="$style.taskStatus">{{ statusText(task.status) }}</span><small v-if="task.cleanupAt">剩余 {{ cleanupRemaining(task.cleanupAt) }}（{{ formatTime(task.cleanupAt) }}）</small></td>
+                <td><span :class="$style.taskStatus">{{ taskStatusText(task) }}</span><small v-if="task.cleanupAt">剩余 {{ cleanupRemaining(task.cleanupAt) }}（{{ formatTime(task.cleanupAt) }}）</small></td>
                 <td>{{ task.progress.toFixed(1) }}%<small v-if="task.speed">{{ task.speed }}/s</small></td>
                 <td>
                   <small v-if="task.failureReason" :class="$style.rowError">{{ task.failureReason }}</small>
@@ -263,14 +263,13 @@
             当前为仅本地下载模式：仍会下载歌曲并按原版设置处理元数据、封面和歌词，但不会复制到 CD2 挂载目录，也不会执行 gRPC 上传确认和 20 分钟延迟清理。
           </div>
           <label><span>本地磁盘阈值（GB）</span><base-input v-model="settings.diskThresholdGb" type="number" /></label>
-          <label><span>数据库备份周期（分钟）</span><base-input v-model="settings.backupInterval" type="number" placeholder="留空关闭自动备份" /></label>
           <div :class="$style.settingsActions">
             <base-btn :disabled="busy" @click="handleSaveSettings">保存设置</base-btn>
             <base-btn v-if="settings.syncToCd2" outline :disabled="busy" @click="handleTestCd2">测试已保存的 CD2 配置</base-btn>
             <base-btn v-if="settings.syncToCd2" outline :disabled="busy" @click="handleBackup">立即备份数据库</base-btn>
             <base-btn v-if="state.config?.diskLocked" outline :disabled="busy" @click="handleUnlockDisk">我已清理磁盘，手动恢复</base-btn>
           </div>
-          <p>下载目录、文件名格式、并发数、封面、歌词和 LRC 继续使用 LX Music 原版设置。最近备份：{{ formatTime(state.config?.backupLastAt) }} {{ state.config?.backupLastPath || '' }}</p>
+          <p>数据库每日自动备份到 CD2，也可手动立即备份。下载目录、文件名格式、并发数、封面、歌词和 LRC 继续使用 LX Music 原版设置。最近备份：{{ formatTime(state.config?.backupLastAt) }} {{ state.config?.backupLastPath || '' }}</p>
         </div>
       </section>
     </main>
@@ -327,7 +326,6 @@ const settings = ref<{
   cd2ApiToken: string
   syncToCd2: boolean
   diskThresholdGb: string
-  backupInterval: string
 }>({
   stopQuality: 'flac',
   cd2RootPath: '',
@@ -335,7 +333,6 @@ const settings = ref<{
   cd2ApiToken: '',
   syncToCd2: true,
   diskThresholdGb: '30',
-  backupInterval: '',
 })
 let calibrationInited = false
 let structureInited = false
@@ -446,7 +443,6 @@ watch(() => state.config, config => {
     cd2ApiToken: config.cd2ApiToken,
     syncToCd2: config.syncToCd2,
     diskThresholdGb: String(Math.round(config.diskThresholdBytes / 1024 / 1024 / 1024)),
-    backupInterval: config.backupIntervalMinutes == null ? '' : String(config.backupIntervalMinutes),
   }
 }, { immediate: true })
 
@@ -547,8 +543,6 @@ const handleResume = async(task: LX.Subscription.Task) => run(async() => resumeT
 const handleSaveSettings = async() => run(async() => {
   const threshold = Number(settings.value.diskThresholdGb)
   if (!Number.isFinite(threshold) || threshold <= 0) throw new Error('磁盘阈值必须大于 0 GB')
-  const backupInterval = settings.value.backupInterval.trim() ? Number(settings.value.backupInterval) : null
-  if (backupInterval != null && (!Number.isInteger(backupInterval) || backupInterval <= 0)) throw new Error('数据库备份周期必须是正整数分钟')
   await saveSubscriptionConfig({
     stopQuality: settings.value.stopQuality,
     cd2RootPath: settings.value.cd2RootPath,
@@ -556,7 +550,6 @@ const handleSaveSettings = async() => run(async() => {
     cd2ApiToken: settings.value.cd2ApiToken,
     syncToCd2: settings.value.syncToCd2,
     diskThresholdBytes: Math.round(threshold * 1024 * 1024 * 1024),
-    backupIntervalMinutes: backupInterval,
   })
 }, '设置已保存')
 const handleTestCd2 = async() => run(async() => {
@@ -644,6 +637,9 @@ const statusText = (status: LX.Subscription.TaskStatus) => ({
   local_completed: '仅本地完成',
   quality_skipped: '音质条件跳过',
 }[status])
+const taskStatusText = (task: LX.Subscription.Task) => task.status == 'disk_paused'
+  ? task.pauseOrigin == 'manual' ? '人工暂停' : '磁盘保护暂停'
+  : statusText(task.status)
 
 let clockTimer: ReturnType<typeof setInterval> | null = null
 onMounted(() => {
