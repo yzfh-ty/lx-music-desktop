@@ -459,6 +459,10 @@ const handleStartTask = async(downloadInfo: LX.Download.ListItem) => {
         break
       case 'complete':
         if (downloadInfo.metadata.subscriptionTaskId) {
+          // 下载已结束，先释放下载槽位；音质复核、元数据与上传属于后续任务阶段
+          void window.lx.worker.download.removeTask(downloadInfo.id)
+          runingTask.delete(downloadInfo.id)
+          void checkStartTask()
           void resumeSubscriptionPostProcess(downloadInfo)
           break
         }
@@ -588,7 +592,13 @@ export const pauseDownloadTasks = async(list: LX.Download.ListItem[]) => {
         break
     }
     if (downloadInfo.metadata.subscriptionTaskId && !downloadInfo.isComplate && downloadInfo.status == DOWNLOAD_STATUS.PAUSE) {
-      void updateSubscriptionTask({ id: downloadInfo.metadata.subscriptionTaskId, status: 'disk_paused', speed: '' })
+      void updateSubscriptionTask({
+        id: downloadInfo.metadata.subscriptionTaskId,
+        status: 'disk_paused',
+        pauseOrigin: 'manual',
+        failureReason: '用户在下载列表中暂停',
+        speed: '',
+      })
     }
   }
   void checkStartTask()
