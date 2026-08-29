@@ -234,12 +234,17 @@ export default () => {
     return global.lx.worker.dbService.getSubscriptionStructureValidationRecords()
   })
   mainHandle<LX.Subscription.BackupResult>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_backup_create, async() => {
-    const config = await global.lx.worker.dbService.getSubscriptionConfig()
-    const health = await checkSubscriptionCd2Health(config)
-    const backupDir = path.join(health.rootPath, '.lx-subscription-backups')
+    // 备份保存在本机软件数据目录，不写入 CD2 挂载目录
+    const backupDir = path.join(global.lxDataPath, 'subscription-backups')
     await fs.promises.mkdir(backupDir, { recursive: true })
     const timestamp = new Date().toISOString().replace(/[-:.]/g, '')
-    return global.lx.worker.dbService.backupSubscriptionDatabase(path.join(backupDir, `lx-data-${timestamp}.db`))
+    const result = await global.lx.worker.dbService.backupSubscriptionDatabase(path.join(backupDir, `lx-data-${timestamp}.db`))
+    // 只保留最近 10 份备份，文件名含时间戳可按名称排序
+    const files = (await fs.promises.readdir(backupDir)).filter(name => name.endsWith('.db')).sort()
+    for (const name of files.slice(0, Math.max(0, files.length - 10))) {
+      await fs.promises.rm(path.join(backupDir, name), { force: true }).catch(() => {})
+    }
+    return result
   })
   mainHandle<number, LX.Subscription.HistoryItem[]>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_history_get, async({ params }) => {
     return global.lx.worker.dbService.getSubscriptionHistory(params)

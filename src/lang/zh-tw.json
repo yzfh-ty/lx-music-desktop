@@ -742,7 +742,7 @@
   "subscription__setting_cd2_token_placeholder": "Token 僅儲存在本機資料庫",
   "subscription__setting_cd2_url": "CD2 gRPC 位址",
   "subscription__setting_cd2_url_placeholder": "例如 http://127.0.0.1:19798",
-  "subscription__setting_footer": "資料庫每日自動備份到 CD2，也可手動立即備份。下載目錄、檔案名稱格式、並行數、封面、歌詞和 LRC 繼續使用 LX Music 原版設定。最近備份：{time} {path}",
+  "subscription__setting_footer": "資料庫每日自動備份到本機，也可手動立即備份。下載目錄、檔案名稱格式、並行數、封面、歌詞和 LRC 繼續使用 LX Music 原版設定。最近備份：{time} {path}",
   "subscription__setting_save": "儲存設定",
   "subscription__setting_saved": "設定已儲存",
   "subscription__setting_stop_quality": "達到此音質後停止升級",

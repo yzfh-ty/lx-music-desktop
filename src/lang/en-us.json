@@ -742,7 +742,7 @@
   "subscription__setting_cd2_token_placeholder": "The token is stored only in the local database",
   "subscription__setting_cd2_url": "CD2 gRPC address",
   "subscription__setting_cd2_url_placeholder": "e.g. http://127.0.0.1:19798",
-  "subscription__setting_footer": "The database is backed up to CD2 daily, and can also be backed up on demand. Download folder, file naming, concurrency, artwork and lyrics keep using the main LX Music settings. Last backup: {time} {path}",
+  "subscription__setting_footer": "The database is backed up locally daily, and can also be backed up on demand. Download folder, file naming, concurrency, artwork and lyrics keep using the main LX Music settings. Last backup: {time} {path}",
   "subscription__setting_save": "Save settings",
   "subscription__setting_saved": "Settings saved",
   "subscription__setting_stop_quality": "Stop upgrading at this quality",
