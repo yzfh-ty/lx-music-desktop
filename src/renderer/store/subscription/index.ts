@@ -364,7 +364,7 @@ export const processSubscriptionQueue = async() => {
 }
 
 // CD2 复制完成后，允许传输任务在这段时间内还没被关联上；超过后转入「待确认」并持续复查，
-// 但绝不标记为失败——本地成品仍在，重新下载没有意义，需求文档也要求此时不清理、不倒计时。
+// 但绝不标记为失败——本地成品仍在，重新下载没有意义，此时不清理、不倒计时。
 const uploadConfirmGraceTime = 10 * 60_000
 const cleanupDelay = 20 * 60_000
 let maintenanceRunning = false
@@ -429,7 +429,7 @@ const syncUploadTaskStatus = async(task: LX.Subscription.Task): Promise<boolean>
     })
     return true
   } catch (err) {
-    // 查询链路本身出错同样属于「无法取得明确成功状态」，按需求文档不清理本地文件、不倒计时
+    // 查询链路本身出错同样属于「无法取得明确成功状态」，此时不清理本地文件、不倒计时
     const message = err instanceof Error ? err.message : String(err)
     if (task.status == 'upload_unconfirmed' && task.failureReason == message) return false
     await updateSubscriptionTask({
