@@ -714,6 +714,8 @@
   "subscription__interval_manual": "Manual only",
   "subscription__interval_minutes": "Every {num} min",
   "subscription__none": "—",
+  "subscription__notice_open_settings": "Open settings",
+  "subscription__notice_scan_required": "CD2 sync is on: run \"Scan existing cloud songs\" first, otherwise pending tasks will not start downloading (also wait while a scan is running). You can turn off \"Sync to CD2 after download\" for local-only mode instead.",
   "subscription__paused_tip": "Subscription paused",
   "subscription__picker_board_empty": "No charts available on this platform",
   "subscription__picker_board_loading": "Loading charts...",

@@ -6,6 +6,11 @@
     <div :class="[$style.content, $style.contentFixed]">
       <p v-if="notice" :class="[$style.notice, noticeError && $style.error]">{{ notice }}</p>
 
+      <div v-if="isTaskTab && state.config?.syncToCd2 && !state.config?.calibrationCompletedAt" :class="$style.lockBar">
+        <span>{{ $t('subscription__notice_scan_required') }}</span>
+        <base-btn min outline :disabled="busy" @click="openSettings">{{ $t('subscription__notice_open_settings') }}</base-btn>
+      </div>
+
       <div v-if="isTaskTab && state.config?.diskLocked" :class="$style.lockBar">
         <span>{{ $t('subscription__disk_locked_tip', { time: formatTime(state.config!.diskPausedAt) }) }}</span>
         <base-btn min outline :disabled="busy" @click="handleUnlockDisk">{{ $t('subscription__disk_unlock') }}</base-btn>
@@ -196,6 +201,7 @@ import { appSetting } from '@renderer/store/setting'
 import { downloadList } from '@renderer/store/download/state'
 import { formatMusicName, getFontSizeWithScreen } from '@renderer/utils'
 import { useI18n } from '@root/lang'
+import { useRouter } from '@common/utils/vueRouter'
 import {
   clearSubscriptionHistory,
   createSubscription,
@@ -217,6 +223,11 @@ import {
 import ListPicker from './components/ListPicker.vue'
 
 const t = useI18n()
+const router = useRouter()
+
+const openSettings = () => {
+  void router.push({ path: '/setting', query: { name: 'SettingSubscription' } })
+}
 
 const activeTab = ref('tasks')
 const busy = ref(false)

@@ -714,6 +714,8 @@
   "subscription__interval_manual": "仅手动",
   "subscription__interval_minutes": "{num} 分钟",
   "subscription__none": "—",
+  "subscription__notice_open_settings": "前往设置",
+  "subscription__notice_scan_required": "已开启同步到 CD2：需要先完成「扫描网盘已有歌曲」，待处理任务才会开始下载（扫描进行中也请等待其完成）。也可以关闭「下载完成后同步到 CD2」改为仅本地下载。",
   "subscription__paused_tip": "订阅已暂停",
   "subscription__picker_board_empty": "当前平台没有可用榜单",
   "subscription__picker_board_loading": "榜单加载中…",

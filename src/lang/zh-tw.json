@@ -714,6 +714,8 @@
   "subscription__interval_manual": "僅手動",
   "subscription__interval_minutes": "{num} 分鐘",
   "subscription__none": "—",
+  "subscription__notice_open_settings": "前往設定",
+  "subscription__notice_scan_required": "已開啟同步到 CD2：需要先完成「掃描網碟已有歌曲」，待處理任務才會開始下載（掃描進行中也請等待其完成）。也可以關閉「下載完成後同步到 CD2」改為僅本機下載。",
   "subscription__paused_tip": "訂閱已暫停",
   "subscription__picker_board_empty": "目前平台沒有可用排行榜",
   "subscription__picker_board_loading": "排行榜載入中…",
