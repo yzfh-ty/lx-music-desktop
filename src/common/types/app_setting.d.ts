@@ -695,6 +695,11 @@ declare global {
        * 是否启用订阅歌单功能
        */
       'subscription.enable': boolean
+
+      /**
+       * 订阅歌曲下载临时目录；留空时使用原版下载目录
+       */
+      'subscription.tempPath': string
     }
   }
 

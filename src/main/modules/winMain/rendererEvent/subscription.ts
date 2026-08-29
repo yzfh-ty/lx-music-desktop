@@ -20,6 +20,12 @@ const comparablePath = (input: string) => {
   return process.platform == 'win32' ? resolved.toLowerCase() : resolved
 }
 
+// 订阅歌曲实际落地目录：优先使用订阅临时目录，未设置时回落原版下载目录
+const getLocalDownloadDir = () => {
+  const tempPath = global.lx.appSetting['subscription.tempPath'].trim()
+  return path.resolve(tempPath || global.lx.appSetting['download.savePath'])
+}
+
 const pathsOverlap = (first: string, second: string) => {
   const a = comparablePath(first)
   const b = comparablePath(second)
@@ -69,7 +75,7 @@ export default () => {
   mainHandle<LX.Subscription.ConfigUpdate, LX.Subscription.Config>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_config_update, async({ params }) => {
     const current = await global.lx.worker.dbService.getSubscriptionConfig()
     const next = { ...current, ...params }
-    const downloadPath = path.resolve(global.lx.appSetting['download.savePath'])
+    const downloadPath = getLocalDownloadDir()
     const cd2RootPath = next.cd2RootPath.trim() ? path.resolve(next.cd2RootPath) : ''
     if (cd2RootPath && pathsOverlap(downloadPath, cd2RootPath)) {
       throw new Error('LX Music 下载目录不能位于 CD2 音乐库内或包含 CD2 音乐库，请先修改原版下载目录')
@@ -120,7 +126,7 @@ export default () => {
     return global.lx.worker.dbService.getSubscriptionDashboard()
   })
   mainHandle<LX.Subscription.DiskInfo>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_disk_info_get, async() => {
-    const targetPath = path.resolve(global.lx.appSetting['download.savePath'])
+    const targetPath = getLocalDownloadDir()
     const stat = await fs.promises.statfs(targetPath)
     const config = await global.lx.worker.dbService.getSubscriptionConfig()
     const cd2RootPath = config.cd2RootPath.trim() ? path.resolve(config.cd2RootPath) : ''

@@ -128,6 +128,7 @@ const defaultSetting: LX.AppSetting = {
   'download.isUseOtherSource': false,
 
   'subscription.enable': false,
+  'subscription.tempPath': '',
 
   'search.isShowHotSearch': false,
   'search.isShowHistorySearch': false,

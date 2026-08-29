@@ -194,7 +194,7 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from '@common/utils/vueTools'
+import { computed, nextTick, onMounted, reactive, ref, shallowRef, watch } from '@common/utils/vueTools'
 import { dialog } from '@renderer/plugins/Dialog'
 import { isFullscreen } from '@renderer/store'
 import { appSetting } from '@renderer/store/setting'
@@ -234,7 +234,6 @@ const busy = ref(false)
 const listPickerVisible = ref(false)
 const notice = ref('')
 const noticeError = ref(false)
-const currentTime = ref(Date.now())
 const editingSubscriptionId = ref<string | null>(null)
 const selectedRetryIds = ref<string[]>([])
 const newItem = reactive({ source: 'wy' as LX.OnlineSource, listType: 'playlist' as LX.Subscription.ListType, listId: '', name: '', interval: '' })
@@ -484,11 +483,6 @@ const listTypeText = (type: LX.Subscription.ListType) =>
 const intervalText = (minutes?: number | null) =>
   minutes ? t('subscription__interval_minutes', { num: minutes }) : t('subscription__interval_manual')
 const formatTime = (time?: number | null) => time ? new Date(time).toLocaleString() : t('subscription__none')
-const cleanupRemaining = (cleanupAt: number) => {
-  const seconds = Math.max(0, Math.ceil((cleanupAt - currentTime.value) / 1000))
-  const minutes = Math.floor(seconds / 60)
-  return `${minutes}:${String(seconds % 60).padStart(2, '0')}`
-}
 const canPause = (task: LX.Subscription.Task) => ['pending', 'downloading'].includes(task.status)
 // 按任务数据本身判断，而不是去匹配失败原因里的字样：
 // 失败原因由主进程生成并落库，拿字符串做条件会在文案变动或翻译后悄悄失效。
@@ -502,18 +496,17 @@ const canIgnoreMetadata = (task: LX.Subscription.Task) => {
 const statusText = (status: LX.Subscription.TaskStatus) => t(`subscription__status_${status}` as 'subscription__status_pending')
 const taskStatusText = (task: LX.Subscription.Task) => task.status == 'disk_paused'
   ? task.pauseOrigin == 'manual' ? t('subscription__status_disk_paused_manual') : t('subscription__status_disk_paused_disk')
-  : statusText(task.status)
+  // 上传确认成功后本地文件只在后台延迟清理，界面直接显示成功，不再展示倒计时
+  : task.status == 'cleanup_wait' ? t('subscription__status_uploaded')
+    : statusText(task.status)
 const taskTitle = (task: LX.Subscription.Task) => formatMusicName(appSetting['download.fileName'], task.name, task.singer)
 const effectiveQuality = (task: LX.Subscription.Task) =>
   task.fileVerifiedQuality ?? task.sourceReportedQuality ?? task.requestedQuality ?? task.cloudQuality
 const shortQualityText = (quality?: LX.Subscription.Quality | null) =>
   quality == null ? t('subscription__none') : quality == 'flac24bit' ? 'FLAC Hires' : quality.toUpperCase()
-// 状态列在一行内说清楚「现在卡在哪里」：失败和待确认直接带上原因，延迟清理带上倒计时
+// 状态列在一行内说清楚「现在卡在哪里」：失败和待确认直接带上原因
 const statusDetailText = (task: LX.Subscription.Task) => {
   const base = taskStatusText(task)
-  if (task.status == 'cleanup_wait' && task.cleanupAt) {
-    return `${base} · ${t('subscription__task_remaining', { time: cleanupRemaining(task.cleanupAt) })}`
-  }
   if (task.failureReason && ['failed', 'upload_unconfirmed', 'disk_paused', 'calibration_unresolved'].includes(task.status)) {
     return `${base} · ${task.failureReason}`
   }
@@ -526,18 +519,11 @@ const historyQuality = (item: LX.Subscription.HistoryItem) =>
 const historyStatusText = (item: LX.Subscription.HistoryItem) =>
   item.message ? `${statusText(item.status)} · ${item.message}` : statusText(item.status)
 
-let clockTimer: ReturnType<typeof setInterval> | null = null
 onMounted(() => {
-  clockTimer = setInterval(() => {
-    currentTime.value = Date.now()
-  }, 1_000)
   void Promise.all([refreshSubscriptionState(), refreshSubscriptionRuntimeStatus()]).catch(err => {
     notice.value = err instanceof Error ? err.message : String(err)
     noticeError.value = true
   })
-})
-onBeforeUnmount(() => {
-  if (clockTimer) clearInterval(clockTimer)
 })
 </script>
 

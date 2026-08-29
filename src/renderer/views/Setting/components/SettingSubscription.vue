@@ -24,6 +24,12 @@ dd.gap-top(:aria-label="$t('setting__subscription_config')")
       | {{ $t('subscription__setting_cd2_token') }}
       div
         base-input(v-model="form.cd2ApiToken" :class="$style.wide" type="password" :placeholder="$t('subscription__setting_cd2_token_placeholder')")
+    .p
+      | {{ $t('setting__subscription_temp_path') }}
+      div
+        span.auto-hidden.hover(:class="$style.tempPath" :title="appSetting['subscription.tempPath']") {{ appSetting['subscription.tempPath'] || $t('setting__subscription_temp_path_empty') }}
+    .p
+      base-btn.btn(min @click="handleChangeTempPath") {{ $t('setting__subscription_temp_path_change') }}
     .p.gap-top
       base-checkbox(id="setting_subscription_sync_to_cd2" :model-value="form.syncToCd2" :label="$t('subscription__setting_sync')" @update:model-value="form.syncToCd2 = $event")
     .p.small.tip(v-if="!form.syncToCd2") {{ $t('subscription__setting_sync_off_tip') }}
@@ -36,6 +42,13 @@ dd.gap-top(:aria-label="$t('setting__subscription_config')")
       base-btn.btn(v-if="form.syncToCd2" min outline :disabled="busy" @click="handleBackup") {{ $t('subscription__setting_backup') }}
       base-btn.btn(v-if="state.config?.diskLocked" min outline :disabled="busy" @click="handleUnlockDisk") {{ $t('subscription__disk_unlock') }}
     .p.small(v-if="message") {{ message }}
+    template(v-if="tempSongs.length")
+      .p {{ $t('setting__subscription_temp_songs') }}
+      div(:class="$style.records")
+        div(v-for="task in tempSongs" :key="task.id" :class="$style.record")
+          span(:class="$style.recordFile" :title="task.localPath") {{ task.localPath }}
+          span(:class="$style.recordStatus")
+            | {{ task.status == 'cleanup_wait' ? $t('subscription__temp_song_cleanup') : $t('subscription__temp_song_keep') }}
     .p.small.tip {{ $t('subscription__setting_footer', { time: formatTime(state.config?.backupLastAt), path: state.config?.backupLastPath || '' }) }}
 
 dd.gap-top(:aria-label="$t('subscription__calibration_title')")
@@ -72,7 +85,9 @@ dd.gap-top(:aria-label="$t('subscription__calibration_title')")
       | {{ $t('subscription__calibration_last_run', { time: formatTime(state.config.calibrationCompletedAt) }) }}
     .p.small(v-if="calibrationMessage") {{ calibrationMessage }}
     template(v-if="state.calibrationRecords.length")
-      .p.small {{ $t('subscription__calibration_records_title') }}
+      .p
+        span {{ $t('subscription__calibration_records_title') }}
+        base-btn.btn(min outline :disabled="autoMatchRunning || busy" @click="autoMatchCalibration") {{ $t('subscription__calibration_auto_match') }}
       div(:class="$style.records")
         div(v-for="record in state.calibrationRecords" :key="record.id" :class="$style.record")
           span(:class="$style.recordFile" :title="record.filePath") {{ record.filePath }}
@@ -121,6 +136,8 @@ dd.gap-top(:aria-label="$t('setting__subscription_structure')")
 <script lang="ts" setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from '@common/utils/vueTools'
 import { useI18n } from '@root/lang'
+import { showSelectDialog } from '@renderer/utils/ipc'
+import musicSdk from '@renderer/utils/musicSdk'
 import { appSetting, updateSetting } from '@renderer/store/setting'
 import {
   ensureSubscriptionConfig,
@@ -206,6 +223,7 @@ const run = async<T>(msg: Ref<string>, action: () => Promise<T>, success: string
   try {
     const result = await action()
     msg.value = typeof success == 'function' ? success(result) : success
+    return result
   } catch (err) {
     msg.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -235,6 +253,18 @@ const handleTestCd2 = async() => run(message, async() => {
 }, t('subscription__setting_test_cd2_ok'))
 const handleBackup = async() => run(message, runSubscriptionBackup, result => t('subscription__setting_backup_done', { path: result.path }))
 const handleUnlockDisk = async() => run(message, unlockDiskQueue, t('subscription__disk_unlocked'))
+const handleChangeTempPath = () => {
+  void showSelectDialog({
+    title: t('setting__subscription_temp_path'),
+    defaultPath: appSetting['subscription.tempPath'] || undefined,
+    properties: ['openDirectory'],
+  }).then(result => {
+    if (result.canceled) return
+    updateSetting({ 'subscription.tempPath': result.filePaths[0] })
+  })
+}
+// 临时目录中尚未清理的歌曲（cleanup_wait 等待自动清理；local_completed 为仅本地保存）
+const tempSongs = computed(() => state.tasks.filter(task => task.localPath))
 
 const parsePathList = (value: string) => value.split(/[,，\n]/).map(item => item.trim()).filter(Boolean)
 const calibrationRunStatusText = (status?: LX.Subscription.CalibrationRun['status']) => ({
@@ -250,8 +280,9 @@ const calibrationStatusText = (status: LX.Subscription.CalibrationRecord['status
 }[status])
 const runCalibrationWithProgress = async(action: () => Promise<LX.Subscription.CalibrationSummary>) => {
   const timer = setInterval(() => { void refreshSubscriptionCalibrationRun() }, 700)
+  let summary: LX.Subscription.CalibrationSummary | null = null
   try {
-    await run(calibrationMessage, action, result => t('subscription__calibration_done', {
+    summary = await run(calibrationMessage, action, result => t('subscription__calibration_done', {
       scanned: result.scanned,
       matched: result.matched,
       unresolved: result.unresolved,
@@ -260,6 +291,58 @@ const runCalibrationWithProgress = async(action: () => Promise<LX.Subscription.C
   } finally {
     clearInterval(timer)
     await refreshSubscriptionCalibrationRun()
+  }
+  // 扫描结束后自动在线匹配未确认歌曲，尽量免手动输入歌曲 ID
+  if (summary && summary.unresolved > 0) await autoMatchCalibration()
+}
+
+const autoMatchRunning = ref(false)
+const delay = async(ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))
+const normSong = (value?: string | null) => (value ?? '').toLowerCase().replace(/[\s'.,，&"、()（）`~\-<>|/[\]!！·]/g, '')
+const formatInterval = (seconds?: number | null) => seconds == null
+  ? ''
+  : `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, '0')}`
+
+/** 在候选里选优先网易云的可靠匹配：歌名完全一致且歌手有包含关系 */
+const pickCandidate = (list: Array<{ source: string, songmid: string, name: string, singer: string }>, title: string, artist: string) => {
+  const fTitle = normSong(title)
+  const fArtist = normSong(artist)
+  const ordered = [...list.filter(item => item.source == 'wy'), ...list.filter(item => item.source != 'wy')]
+  return ordered.find(item => normSong(item.name) == fTitle &&
+    (!fArtist || normSong(item.singer).includes(fArtist) || fArtist.includes(normSong(item.singer)))) ?? null
+}
+
+const autoMatchCalibration = async() => {
+  if (autoMatchRunning.value) return
+  const pending = state.calibrationRecords.filter(record => record.status == 'unresolved' && record.title)
+  if (!pending.length) return
+  autoMatchRunning.value = true
+  let matched = 0
+  try {
+    let done = 0
+    for (const record of pending) {
+      done += 1
+      calibrationMessage.value = t('subscription__calibration_auto_matching', { done, total: pending.length })
+      try {
+        const candidates = await musicSdk.findMusic({
+          name: record.title,
+          singer: record.artist,
+          albumName: '',
+          interval: formatInterval(record.duration),
+        }) as Array<{ source: string, songmid: string, name: string, singer: string }> | null
+        const pick = candidates ? pickCandidate(candidates, record.title, record.artist) : null
+        if (pick) {
+          await resolveSubscriptionCalibration({ recordId: record.id, musicKey: `${pick.source}:${pick.songmid}` })
+          matched += 1
+        }
+      } catch {
+        // 单条匹配失败不中断整批
+      }
+      await delay(300)
+    }
+    calibrationMessage.value = t('subscription__calibration_auto_match_done', { count: matched })
+  } finally {
+    autoMatchRunning.value = false
   }
 }
 const handleCalibration = async() => runCalibrationWithProgress(async() => runSubscriptionCalibration({
@@ -402,5 +485,12 @@ const handleStructureValidation = async() => {
   width: 110px;
   padding: 2px 6px;
   font-size: 12px;
+}
+.tempPath {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>
