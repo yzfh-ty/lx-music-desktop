@@ -690,6 +690,11 @@ declare global {
        * 是否在离开搜索界面时自动清空搜索结果列表
        */
       'odc.isAutoClearSearchList': boolean
+
+      /**
+       * 是否启用订阅歌单功能
+       */
+      'subscription.enable': boolean
     }
   }
 

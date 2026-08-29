@@ -534,7 +534,7 @@ export const failSubscriptionCalibrationRun = (message: string): LX.Subscription
 
 export const resumeSubscriptionCalibrationRun = (): LX.Subscription.CalibrationRun => {
   const run = getSubscriptionCalibrationRun()
-  if (!run) throw new Error('没有可恢复的校准任务')
+  if (!run) throw new Error('没有可恢复的扫描任务')
   getDB().prepare(`
     UPDATE subscription_calibration_run SET status = CASE WHEN total > 0 THEN 'running' ELSE 'collecting' END,
       error = NULL, updated_at = ? WHERE id = 1
@@ -547,7 +547,7 @@ const applyCalibrationMatch = (
   file: LX.Subscription.CalibrationFile,
   confirmedAt: number,
 ) => {
-  if (!file.quality) throw new Error('校准文件音质不可比较')
+  if (!file.quality) throw new Error('扫描文件的音质无法比较')
   const db = getDB()
   const config = getSubscriptionConfig()
   db.prepare(`
@@ -641,7 +641,7 @@ export const importSubscriptionCalibration = (files: LX.Subscription.Calibration
       upsert.run(file.filePath, file.title, file.artist, file.duration, file.quality,
         status, JSON.stringify(candidates), error, scannedAt, status == 'matched' ? scannedAt : null)
       if (status == 'unresolved' && candidates.length) {
-        const reason = `云端校准尚未解决：${file.filePath}`
+        const reason = `网盘歌曲待人工确认：${file.filePath}`
         for (const musicKey of candidates) {
           db.prepare(`
             UPDATE subscription_library SET calibration_status = 'calibration_unresolved', updated_at = ?
@@ -650,7 +650,7 @@ export const importSubscriptionCalibration = (files: LX.Subscription.Calibration
           db.prepare(`
             UPDATE subscription_task SET status = 'calibration_unresolved', failure_reason = ?,
               progress = 0, speed = '', updated_at = ?
-            WHERE music_key = ? AND status NOT IN ('uploading', 'old_version_cleanup', 'cleanup_wait', 'local_completed')
+            WHERE music_key = ? AND status NOT IN ('uploading', 'upload_unconfirmed', 'old_version_cleanup', 'cleanup_wait', 'local_completed')
           `).run(reason, scannedAt, musicKey)
         }
       }
@@ -670,7 +670,7 @@ export const getSubscriptionCalibrationRecords = (): LX.Subscription.Calibration
 export const confirmSubscriptionCalibration = (input: LX.Subscription.CalibrationConfirmInput): LX.Subscription.CalibrationRecord => {
   const db = getDB()
   const row = db.prepare('SELECT * FROM subscription_calibration WHERE id = ?').get(input.recordId) as CalibrationRow | undefined
-  if (!row) throw new Error('校准记录不存在')
+  if (!row) throw new Error('待确认记录不存在')
   if (!db.prepare('SELECT 1 FROM subscription_library WHERE music_key = ?').get(input.musicKey)) throw new Error('目标订阅歌曲不存在')
   const record = toCalibrationRecord(row)
   const confirmedAt = Date.now()
@@ -681,7 +681,7 @@ export const confirmSubscriptionCalibration = (input: LX.Subscription.Calibratio
     } | undefined
     if (!existing) throw new Error('人工确认的歌曲键不存在于订阅音乐库')
     if (existing.cloud_path && existing.cloud_path != record.filePath && existing.record_origin == 'calibrated') {
-      throw new Error('该歌曲已关联另一个校准文件，请先处理重复关联')
+      throw new Error('该歌曲已关联另一个待确认文件，请先处理重复关联')
     }
     applyCalibrationMatch(input.musicKey, record, confirmedAt)
     db.prepare(`
@@ -835,7 +835,7 @@ export const updateSubscriptionTask = (input: LX.Subscription.TaskUpdate): LX.Su
   if (!currentRow) throw new Error('任务不存在')
   const current = toTask(currentRow)
   const next = { ...current, ...input, updatedAt: Date.now() }
-  if (next.status == 'uploading' && !getSubscriptionConfig().syncToCd2) {
+  if ((next.status == 'uploading' || next.status == 'upload_unconfirmed') && !getSubscriptionConfig().syncToCd2) {
     next.status = 'local_completed'
     next.progress = 100
     next.speed = ''
@@ -885,7 +885,7 @@ export const retrySubscriptionTasks = (ids: string[]): number => {
           ELSE 'pending'
         END, failure_reason = NULL, pause_origin = NULL,
         progress = 0, speed = '', retry_count = retry_count + 1, updated_at = ?
-      WHERE id = ? AND status = 'failed'
+      WHERE id = ? AND status IN ('failed', 'upload_unconfirmed')
     `)
     const find = db.prepare('SELECT music_key, status FROM subscription_task WHERE id = ?')
     const history = db.prepare(`
@@ -949,6 +949,7 @@ export const getSubscriptionDashboard = (): LX.Subscription.Dashboard => {
     pendingCount: count("SELECT COUNT(*) FROM subscription_task WHERE status IN ('discovered', 'pending', 'disk_paused', 'resolving')"),
     downloadingCount: count("SELECT COUNT(*) FROM subscription_task WHERE status IN ('downloading', 'downloaded', 'quality_check', 'tagging')"),
     uploadingCount: count("SELECT COUNT(*) FROM subscription_task WHERE status IN ('uploading', 'old_version_cleanup')"),
+    unconfirmedCount: count("SELECT COUNT(*) FROM subscription_task WHERE status = 'upload_unconfirmed'"),
     failedCount: count("SELECT COUNT(*) FROM subscription_task WHERE status = 'failed'"),
     cleanupCount: count("SELECT COUNT(*) FROM subscription_task WHERE status = 'cleanup_wait'"),
     libraryCount: count('SELECT COUNT(*) FROM subscription_library'),
@@ -1074,12 +1075,12 @@ export const requeueSubscriptionMusic = (musicKey: string): LX.Subscription.Task
   const row = db.prepare(`${taskSelect} WHERE t.music_key = ?`).get(musicKey) as TaskRow | undefined
   if (!row) throw new Error('歌曲任务不存在')
   const current = toTask(row)
-  if (['resolving', 'downloading', 'quality_check', 'tagging', 'uploading', 'old_version_cleanup', 'cleanup_wait'].includes(current.status)) {
+  if (['resolving', 'downloading', 'quality_check', 'tagging', 'uploading', 'upload_unconfirmed', 'old_version_cleanup', 'cleanup_wait'].includes(current.status)) {
     throw new Error('该歌曲正在处理中，不能重复加入队列')
   }
-  if (current.status == 'calibration_unresolved') throw new Error('该歌曲仍有未解决的云端校准记录')
+  if (current.status == 'calibration_unresolved') throw new Error('该歌曲仍有待人工确认的网盘记录')
   if (current.localPath) throw new Error('该歌曲仍保留本地成品，请在任务页面继续原任务或完成上传')
-  if (current.existingCloudPath && !current.cloudQuality) throw new Error('该歌曲的云端音质尚未确认，请先完成校准')
+  if (current.existingCloudPath && !current.cloudQuality) throw new Error('该歌曲的云端音质尚未确认，请先完成扫描')
   const now = Date.now()
   db.transaction(() => {
     db.prepare(`

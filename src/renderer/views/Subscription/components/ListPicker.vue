@@ -15,7 +15,7 @@
             @click="selectBoard(item)"
           >{{ item.name }}</button>
         </div>
-        <p v-else :class="$style.empty">{{ boardLoading ? '榜单加载中…' : (boardError || '当前平台没有可用榜单') }}</p>
+        <p v-else :class="$style.empty">{{ boardLoading ? $t('subscription__picker_board_loading') : (boardError || $t('subscription__picker_board_empty')) }}</p>
       </div>
 
       <div v-else :class="$style.content">
@@ -34,7 +34,7 @@
             </div>
           </button>
         </div>
-        <p v-else :class="$style.empty">{{ playlistLoading ? '歌单加载中…' : (playlistError || '当前平台没有可用歌单') }}</p>
+        <p v-else :class="$style.empty">{{ playlistLoading ? $t('subscription__picker_playlist_loading') : (playlistError || $t('subscription__picker_playlist_empty')) }}</p>
         <div v-if="playlistInfo.total > playlistInfo.limit" :class="$style.pagination">
           <material-pagination
             :count="playlistInfo.total"
@@ -49,9 +49,10 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, watch } from '@common/utils/vueTools'
+import { computed, ref, watch } from '@common/utils/vueTools'
 import musicSdk from '@renderer/utils/musicSdk'
 import { getBoardsList } from '@renderer/store/leaderboard/action'
+import { useI18n } from '@root/lang'
 import type { BoardItem } from '@renderer/store/leaderboard/state'
 import type { ListInfoItem } from '@renderer/store/songList/state'
 
@@ -72,10 +73,12 @@ const emit = defineEmits<{
   select: [selection: ListPickerSelection]
 }>()
 
-const tabs = [
-  { id: 'board', label: '榜单' },
-  { id: 'playlist', label: '歌单' },
-]
+const t = useI18n()
+
+const tabs = computed(() => [
+  { id: 'board', label: t('subscription__picker_tab_board') },
+  { id: 'playlist', label: t('subscription__picker_tab_playlist') },
+])
 
 const tab = ref<'board' | 'playlist'>('board')
 const source = ref<LX.OnlineSource>('wy')
@@ -112,7 +115,7 @@ const loadPlaylists = async(page: number) => {
   playlistError.value = ''
   try {
     const result = await musicSdk[source.value]?.songList.getList('', '', page)
-    if (result == null) throw new Error('当前平台不支持歌单列表')
+    if (result == null) throw new Error(t('subscription__picker_playlist_unsupported'))
     playlistInfo.value = {
       list: result.list ?? [],
       total: result.total ?? 0,

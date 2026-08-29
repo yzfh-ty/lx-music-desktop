@@ -15,6 +15,7 @@ declare namespace LX {
     | 'quality_check'
     | 'tagging'
     | 'uploading'
+    | 'upload_unconfirmed'
     | 'old_version_cleanup'
     | 'cleanup_wait'
     | 'local_completed'
@@ -175,6 +176,7 @@ declare namespace LX {
       pendingCount: number
       downloadingCount: number
       uploadingCount: number
+      unconfirmedCount: number
       failedCount: number
       cleanupCount: number
       libraryCount: number
@@ -208,9 +210,18 @@ declare namespace LX {
     }
 
     interface Cd2UploadStatus {
-      state: 'missing' | 'running' | 'success' | 'failed'
+      /**
+       * running: CD2 传输任务仍在进行
+       * success: CD2 已明确确认上传成功
+       * failed: CD2 明确报告传输任务失败
+       * unconfirmed: 暂时无法取得明确结论（未关联到传输任务、多任务冲突、gRPC 不可用等），
+       *              既不能当作成功启动延迟清理，也不能当作失败要求重新下载
+       */
+      state: 'unconfirmed' | 'running' | 'success' | 'failed'
       progress: number
       message: string
+      /** 结论是否由云端文件校验而非传输任务列表得出 */
+      verifiedByCloudFile?: boolean
     }
 
     interface Cd2Health {

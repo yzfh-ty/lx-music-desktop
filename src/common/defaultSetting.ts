@@ -127,6 +127,8 @@ const defaultSetting: LX.AppSetting = {
   'download.isEmbedLyricR': false,
   'download.isUseOtherSource': false,
 
+  'subscription.enable': false,
+
   'search.isShowHotSearch': false,
   'search.isShowHistorySearch': false,
   'search.isFocusSearchBox': false,

@@ -59,6 +59,7 @@ import SettingDesktopLyric from './components/SettingDesktopLyric.vue'
 import SettingSearch from './components/SettingSearch.vue'
 import SettingList from './components/SettingList.vue'
 import SettingDownload from './components/SettingDownload.vue'
+import SettingSubscription from './components/SettingSubscription.vue'
 import SettingSync from './components/SettingSync/index.vue'
 import SettingOpenAPI from './components/SettingOpenAPI.vue'
 import SettingHotKey from './components/SettingHotKey.vue'
@@ -79,6 +80,7 @@ export default {
     SettingSearch,
     SettingList,
     SettingDownload,
+    SettingSubscription,
     SettingSync,
     SettingOpenAPI,
     SettingHotKey,
@@ -104,6 +106,7 @@ export default {
         { id: 'SettingSearch', title: t('setting__search') },
         { id: 'SettingList', title: t('setting__list') },
         { id: 'SettingDownload', title: t('setting__download') },
+        { id: 'SettingSubscription', title: t('setting__subscription') },
         { id: 'SettingHotKey', title: t('setting__hot_key') },
         { id: 'SettingSync', title: t('setting__sync') },
         { id: 'SettingOpenAPI', title: t('setting__open_api') },

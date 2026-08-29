@@ -75,11 +75,11 @@ export default {
         },
         {
           to: '/subscription',
-          tips: '订阅下载',
-          icon: '#icon-download-2',
-          iconSize: '0 0 425.2 425.2',
+          tips: t('subscription'),
+          icon: '#icon-refresh',
+          iconSize: '0 0 24 24',
           size,
-          enable: true,
+          enable: appSetting['subscription.enable'],
           name: 'Subscription',
         },
         {

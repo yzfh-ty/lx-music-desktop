@@ -21,7 +21,7 @@ const resolveScopedPaths = (rootPath: string, values: string[]) => values
   .filter(Boolean)
   .map(value => path.resolve(rootPath, value))
   .map(value => {
-    if (!isWithin(rootPath, value)) throw new Error(`校准目录超出根目录：${value}`)
+    if (!isWithin(rootPath, value)) throw new Error(`扫描目录超出根目录：${value}`)
     return value
   })
 
@@ -59,9 +59,9 @@ export const collectSubscriptionCalibrationFiles = async(
 ): Promise<string[]> => {
   await checkSubscriptionCd2Health(config)
   const rootPath = path.resolve(input.rootPath.trim() || config.cd2RootPath)
-  if (!isWithin(config.cd2RootPath, rootPath)) throw new Error('校准根目录必须位于 CD2 音乐库根目录内')
+  if (!isWithin(config.cd2RootPath, rootPath)) throw new Error('扫描根目录必须位于 CD2 音乐库根目录内')
   const rootStat = await fs.promises.stat(rootPath).catch(() => null)
-  if (!rootStat?.isDirectory()) throw new Error('校准根目录不存在或不是目录')
+  if (!rootStat?.isDirectory()) throw new Error('扫描根目录不存在或不是目录')
   const excludes = resolveScopedPaths(rootPath, input.excludePaths)
   const includes = resolveScopedPaths(rootPath, input.includePaths)
   const scanRoots = includes.length ? includes : [rootPath]

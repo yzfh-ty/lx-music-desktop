@@ -16,6 +16,7 @@ module.exports = {
     'font-list': 'font-list',
     'better-sqlite3': 'better-sqlite3',
     'electron-font-manager': 'electron-font-manager',
+    'music-metadata': 'music-metadata',
     bufferutil: 'bufferutil',
     'utf-8-validate': 'utf-8-validate',
     'qrc_decode.node': isDev ? path.join(__dirname, '../../build/Release/qrc_decode.node') : path.join('../build/Release/qrc_decode.node'),

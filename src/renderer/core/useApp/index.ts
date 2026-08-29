@@ -14,8 +14,9 @@ import useDeeplink from './useDeeplink'
 import usePlayer from './usePlayer'
 import useSettingSync from './useSettingSync'
 import { useRouter } from '@common/utils/vueRouter'
+import { watch } from '@common/utils/vueTools'
 import handleListAutoUpdate from './listAutoUpdate'
-import { initSubscriptionService } from '@renderer/store/subscription'
+import { initSubscriptionService, stopSubscriptionService } from '@renderer/store/subscription'
 
 
 export default () => {
@@ -72,7 +73,17 @@ export default () => {
       sendInited()
 
       handleListAutoUpdate()
-      void initSubscriptionService().catch(err => { console.error('Subscription service init failed:', err) })
+      // 订阅功能与“启用下载功能”一致，默认关闭，在设置页开启
+      if (appSetting['subscription.enable']) {
+        void initSubscriptionService().catch(err => { console.error('Subscription service init failed:', err) })
+      }
+      watch(() => appSetting['subscription.enable'], enable => {
+        if (enable) {
+          void initSubscriptionService().catch(err => { console.error('Subscription service init failed:', err) })
+        } else {
+          stopSubscriptionService()
+        }
+      })
       if (window.lx.isProd && appSetting['common.isAgreePact']) checkUpdate()
     })
   })

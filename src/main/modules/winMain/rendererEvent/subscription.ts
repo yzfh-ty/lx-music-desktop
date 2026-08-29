@@ -32,13 +32,13 @@ const executeSubscriptionCalibration = async(
   input: LX.Subscription.CalibrationScanInput,
   startNew: boolean,
 ): Promise<LX.Subscription.CalibrationSummary> => {
-  if (calibrationExecutionRunning) throw new Error('已有校准任务正在运行')
+  if (calibrationExecutionRunning) throw new Error('已有扫描任务正在运行')
   calibrationExecutionRunning = true
   try {
     if (startNew) await global.lx.worker.dbService.beginSubscriptionCalibrationRun(input)
     else await global.lx.worker.dbService.resumeSubscriptionCalibrationRun()
     let run = await global.lx.worker.dbService.getSubscriptionCalibrationRun()
-    if (!run) throw new Error('校准运行记录不存在')
+    if (!run) throw new Error('扫描运行记录不存在')
     if (run.status == 'collecting') {
       const files = await collectSubscriptionCalibrationFiles(config, input)
       run = await global.lx.worker.dbService.prepareSubscriptionCalibrationFiles(files)
@@ -48,7 +48,7 @@ const executeSubscriptionCalibration = async(
       run = await global.lx.worker.dbService.saveSubscriptionCalibrationFile(file)
     }
     const files = await global.lx.worker.dbService.getSubscriptionCalibrationRunFiles()
-    if (files.length != run.total) throw new Error('校准文件进度不完整，已保留现场等待恢复')
+    if (files.length != run.total) throw new Error('扫描进度不完整，已保留现场等待恢复')
     const summary = await global.lx.worker.dbService.importSubscriptionCalibration(files)
     await global.lx.worker.dbService.completeSubscriptionCalibrationRun(summary)
     return summary
@@ -186,9 +186,9 @@ export default () => {
     return checkSubscriptionCd2Health(await global.lx.worker.dbService.getSubscriptionConfig())
   })
   mainHandle<LX.Subscription.CalibrationScanInput, LX.Subscription.CalibrationSummary>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_calibration_scan, async({ params }) => {
-    const activeStatuses: LX.Subscription.TaskStatus[] = ['resolving', 'downloading', 'downloaded', 'quality_check', 'tagging', 'uploading', 'old_version_cleanup']
+    const activeStatuses: LX.Subscription.TaskStatus[] = ['resolving', 'downloading', 'downloaded', 'quality_check', 'tagging', 'uploading', 'upload_unconfirmed', 'old_version_cleanup']
     const activeTask = (await global.lx.worker.dbService.getSubscriptionTasks()).find(task => activeStatuses.includes(task.status))
-    if (activeTask) throw new Error(`任务“${activeTask.name}”仍在处理中，请等待当前下载或上传结束后再重新校准`)
+    if (activeTask) throw new Error(`任务“${activeTask.name}”仍在处理中，请等待当前下载或上传结束后再重新扫描`)
     const config = await global.lx.worker.dbService.updateSubscriptionConfig({
       calibrationRootPath: params.rootPath,
       calibrationRecursive: params.recursive,
@@ -202,7 +202,7 @@ export default () => {
   })
   mainHandle<LX.Subscription.CalibrationSummary>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_calibration_resume, async() => {
     const run = await global.lx.worker.dbService.getSubscriptionCalibrationRun()
-    if (!run || run.status == 'completed') throw new Error('没有可恢复的校准任务')
+    if (!run || run.status == 'completed') throw new Error('没有可恢复的扫描任务')
     const config = await global.lx.worker.dbService.getSubscriptionConfig()
     return executeSubscriptionCalibration(config, run.input, false)
   })

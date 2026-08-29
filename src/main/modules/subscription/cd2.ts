@@ -10,12 +10,15 @@ interface CloudDriveSystemInfo {
   hasError?: boolean
 }
 
+interface TokenPermissions {
+  allow_list?: boolean
+  allow_get_mounts?: boolean
+  allow_get_transfer_tasks?: boolean
+}
+
 interface TokenInfo {
   token: string
-  permissions?: {
-    allow_get_mounts?: boolean
-    allow_get_transfer_tasks?: boolean
-  }
+  permissions?: TokenPermissions
 }
 
 interface MountPoint {
@@ -35,6 +38,15 @@ interface UploadFileInfo {
   errorMessage: string
   operatorType: number
   statusEnum: number
+}
+
+interface CloudDriveFile {
+  name: string
+  fullPathName: string
+  size: number | string
+  isDirectory: boolean
+  isCloudFile: boolean
+  isLocal: boolean
 }
 
 interface Cd2Client extends grpc.Client {
@@ -61,6 +73,12 @@ interface Cd2Client extends grpc.Client {
     metadata: grpc.Metadata,
     options: grpc.CallOptions,
     callback: (error: grpc.ServiceError | null, result: { uploadFiles: UploadFileInfo[] }) => void
+  ) => grpc.ClientUnaryCall
+  findFileByPath: (
+    request: { parentPath: string, path: string },
+    metadata: grpc.Metadata,
+    options: grpc.CallOptions,
+    callback: (error: grpc.ServiceError | null, result: CloudDriveFile) => void
   ) => grpc.ClientUnaryCall
 }
 
@@ -170,7 +188,7 @@ const checkConnection = async(config: LX.Subscription.Config) => {
     const rootStat = await fs.promises.stat(mountedRoot.rootPath).catch(() => null)
     if (!rootStat?.isDirectory()) throw new Error('CD2 音乐库根目录不存在或不是目录')
     await fs.promises.access(mountedRoot.rootPath, fs.constants.R_OK | fs.constants.W_OK)
-    return { client, metadata, options, mountedRoot }
+    return { client, metadata, options, mountedRoot, permissions: token.permissions }
   } catch (error) {
     client.close()
     throw error
@@ -184,6 +202,36 @@ const toRemotePath = (mountedRoot: MountedRoot, targetPath: string) => {
 
 const normalizeRemotePath = (input: string) => input.replace(/\\/g, '/').replace(/\/{2,}/g, '/').replace(/\/$/, '').toLowerCase()
 const lrcPathFor = (input: string) => input.replace(/\.[^.\\/]+$/, '.lrc')
+
+// UploadFileInfo.Status
+const UPLOAD_ACTIVE_STATUS = [0, 1, 3, 4, 7] // WaitforPreprocessing / Preprocessing / Transfer / Pause / Inqueue
+const UPLOAD_SUCCESS_STATUS = 5 // Finish
+const UPLOAD_SKIPPED_STATUS = 6 // Skipped：目标已存在或秒传，需要另行校验云端文件才能下结论
+const UPLOAD_FAILED_STATUS = [2, 8, 9, 10] // Cancelled / Ignored / Error / FatalError
+
+type Cd2Connection = Awaited<ReturnType<typeof checkConnection>>
+
+/**
+ * 通过 gRPC 直接查询云端文件本身。
+ * CD2 在传输任务结束后会把它移出上传列表，所以「关联不到传输任务」不能等同于上传失败，
+ * 必须再向云端确认一次文件是否真的存在且大小一致。
+ */
+const findCloudFile = async(connection: Cd2Connection, remotePath: string): Promise<CloudDriveFile | null> => {
+  if (connection.permissions?.allow_list === false) return null
+  const normalized = remotePath.replace(/\\/g, '/').replace(/\/{2,}/g, '/').replace(/\/$/, '')
+  const separatorIndex = normalized.lastIndexOf('/')
+  const parentPath = separatorIndex > 0 ? normalized.slice(0, separatorIndex) : '/'
+  const name = normalized.slice(separatorIndex + 1)
+  if (!name) return null
+  // 不同 CD2 版本对 parentPath / path 的期望不一致，两种调用方式都尝试一次
+  for (const request of [{ parentPath, path: name }, { parentPath: '', path: normalized }]) {
+    const file = await call<CloudDriveFile>(callback => connection.client.findFileByPath(
+      request, connection.metadata, connection.options, callback,
+    )).catch(() => null)
+    if (file?.fullPathName && !file.isDirectory) return file
+  }
+  return null
+}
 
 export const checkSubscriptionCd2Health = async(config: LX.Subscription.Config): Promise<LX.Subscription.Cd2Health> => {
   const connection = await checkConnection(config)
@@ -272,33 +320,85 @@ export const getSubscriptionCd2UploadStatus = async(input: {
   const connection = await checkConnection(input.config)
   try {
     if (!isWithin(connection.mountedRoot.rootPath, cloudPath)) throw new Error('目标云端路径超出 CD2 音乐库根目录')
-    const expectedDestPath = normalizeRemotePath(toRemotePath(connection.mountedRoot, cloudPath))
+    const remotePath = toRemotePath(connection.mountedRoot, cloudPath)
+    const expectedDestPath = normalizeRemotePath(remotePath)
     const localStat = await fs.promises.stat(input.localPath).catch(() => null)
+    // 能不能拿到权威的云端结论：需要 Token 有列目录权限，且有本地成品作为大小基准
+    const canQueryCloud = connection.permissions?.allow_list !== false && localStat != null
+    // 云端校验：必须是真正落到云端的文件（而不是 CD2 尚未上传、仅存在于本地写缓存里的条目），
+    // 并且大小与本地成品完全一致。查询失败一律按未通过处理——推迟确认永远比误删安全。
+    const verifyCloudFile = async() => {
+      if (!localStat) return false
+      const file = await findCloudFile(connection, remotePath)
+      if (!file?.isCloudFile || file.isLocal) return false
+      return Number(file.size) == localStat.size
+    }
+    // 降级手段：只有在查不了云端时才退回挂载点 stat。
+    // 挂载点反映的是 CD2 的虚拟文件系统，文件复制进去就立刻可见，
+    // 所以它不能推翻云端给出的否定结论，否则会把没传完的文件当成功而删掉本地成品。
+    const verifyMountedFile = async() => {
+      const cloudStat = await fs.promises.stat(cloudPath).catch(() => null)
+      return !!cloudStat?.isFile() && (!localStat || cloudStat.size == localStat.size)
+    }
     const result = await call<{ uploadFiles: UploadFileInfo[] }>(callback => connection.client.getUploadFileList({
       getAll: true,
       itemsPerPage: 200,
       pageNumber: 1,
       filter: path.basename(cloudPath),
     }, connection.metadata, connection.options, callback))
-    const sizeMatches = result.uploadFiles.filter(item => !localStat || Number(item.size) == localStat.size)
-    const exactMatches = sizeMatches.filter(item => normalizeRemotePath(item.destPath) == expectedDestPath)
+    const uploadFiles = result.uploadFiles ?? []
+    // 先按目标路径精确关联，再退回到「同名且大小唯一匹配」的启发式。
+    // 旧实现先按大小过滤、再从结果里找精确匹配，导致 CD2 在预处理阶段报告 size=0 时，
+    // 本来能精确对上的传输任务也会被丢掉，最终被误判成「尚未关联」。
+    const exactMatches = uploadFiles.filter(item => normalizeRemotePath(item.destPath) == expectedDestPath)
+    const sizeMatches = localStat ? uploadFiles.filter(item => Number(item.size) == localStat.size) : []
     const candidates = exactMatches.length ? exactMatches : sizeMatches.length == 1 ? sizeMatches : []
-    if (!candidates.length) return { state: 'missing', progress: 0, message: '尚未关联到对应的 CD2 上传任务' }
-    const active = candidates.filter(item => [0, 1, 3, 4, 7].includes(item.statusEnum))
-    if (active.length > 1) return { state: 'missing', progress: 0, message: '关联到多个仍在运行的 CD2 上传任务，暂不确认' }
-    const terminalGroups = new Set(candidates.map(item => item.statusEnum == 5 ? 'success' : 'failed'))
+
+    if (!candidates.length) {
+      if (await verifyCloudFile()) {
+        return {
+          state: 'success',
+          progress: 100,
+          message: 'CD2 传输任务已结束并移出列表，已通过云端文件校验确认上传成功',
+          verifiedByCloudFile: true,
+        }
+      }
+      return {
+        state: 'unconfirmed',
+        progress: 0,
+        message: connection.permissions?.allow_list === false
+          ? '尚未关联到对应的 CD2 上传任务；API Token 缺少列目录权限，无法回退到云端文件校验'
+          : '尚未关联到对应的 CD2 上传任务，云端文件也尚未就绪，继续等待确认',
+      }
+    }
+    const active = candidates.filter(item => UPLOAD_ACTIVE_STATUS.includes(item.statusEnum))
+    if (active.length > 1) return { state: 'unconfirmed', progress: 0, message: '关联到多个仍在运行的 CD2 上传任务，暂不确认' }
+    const terminalGroups = new Set(candidates.map(item => item.statusEnum == UPLOAD_SUCCESS_STATUS ? 'success' : 'failed'))
     if (!active.length && terminalGroups.size > 1) {
-      return { state: 'missing', progress: 0, message: '关联到状态冲突的多个 CD2 上传任务，暂不确认' }
+      return { state: 'unconfirmed', progress: 0, message: '关联到状态冲突的多个 CD2 上传任务，暂不确认' }
     }
     const upload = active[0] ?? candidates[0]
-    const size = Number(upload.size)
+    const reportedSize = Number(upload.size)
+    // CD2 预处理阶段可能还报告 size=0，此时用本地文件大小做分母，避免进度恒为 0
+    const size = reportedSize > 0 ? reportedSize : localStat?.size ?? 0
     const progress = size > 0 ? Math.min(100, Number(upload.transferedBytes) / size * 100) : 0
-    if (upload.statusEnum == 5) {
-      const cloudStat = await fs.promises.stat(cloudPath).catch(() => null)
-      if (!cloudStat?.isFile()) return { state: 'missing', progress: 100, message: 'CD2 上传任务已完成，但目标文件不存在' }
-      return { state: 'success', progress: 100, message: upload.status || 'Finish' }
+    if (upload.statusEnum == UPLOAD_SUCCESS_STATUS) {
+      // 能查云端时以云端结论为准；查不了才退回挂载点 stat
+      const confirmed = canQueryCloud ? await verifyCloudFile() : await verifyMountedFile()
+      if (confirmed) {
+        return { state: 'success', progress: 100, message: upload.status || 'Finish', verifiedByCloudFile: canQueryCloud }
+      }
+      return { state: 'unconfirmed', progress: 100, message: 'CD2 上传任务已完成，但目标文件尚未校验通过' }
     }
-    if ([2, 6, 8, 9, 10].includes(upload.statusEnum)) {
+    if (upload.statusEnum == UPLOAD_SKIPPED_STATUS) {
+      // Skipped 通常意味着目标已存在或秒传成功，只有校验不过才算失败
+      const confirmed = canQueryCloud ? await verifyCloudFile() : await verifyMountedFile()
+      if (confirmed) {
+        return { state: 'success', progress: 100, message: upload.status || 'Skipped', verifiedByCloudFile: canQueryCloud }
+      }
+      return { state: 'failed', progress, message: upload.errorMessage || upload.status || 'CD2 跳过了该上传任务且云端文件不可用' }
+    }
+    if (UPLOAD_FAILED_STATUS.includes(upload.statusEnum)) {
       return { state: 'failed', progress, message: upload.errorMessage || upload.status || 'CD2 上传任务失败' }
     }
     return { state: 'running', progress, message: upload.status || 'CD2 正在上传' }

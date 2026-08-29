@@ -1,4 +1,4 @@
-import { reactive } from '@common/utils/vueTools'
+import { reactive, toRaw } from '@common/utils/vueTools'
 import { getListDetailAll as getSongListDetailAll } from '@renderer/store/songList/action'
 import { getListDetailAll as getBoardListDetailAll } from '@renderer/store/leaderboard/action'
 import {
@@ -102,6 +102,10 @@ export const refreshSubscriptionState = async() => {
   subscriptionState.history = history
 }
 
+/** CD2 三项配置是否都填了。没填全时任何 gRPC 调用都必然失败，不必发起 */
+const isCd2Configured = (config: LX.Subscription.Config) =>
+  !!config.cd2RootPath.trim() && !!config.cd2GrpcUrl.trim() && !!config.cd2ApiToken.trim()
+
 export const refreshSubscriptionRuntimeStatus = async() => {
   const config = subscriptionState.config ?? await getSubscriptionConfig()
   const diskPromise = getSubscriptionDiskInfo()
@@ -112,9 +116,9 @@ export const refreshSubscriptionRuntimeStatus = async() => {
     subscriptionState.cd2Health = null
     subscriptionState.cd2HealthError = ''
     cd2Promise = Promise.resolve()
-  } else if (!config.cd2RootPath.trim() || !config.cd2GrpcUrl.trim() || !config.cd2ApiToken.trim()) {
+  } else if (!isCd2Configured(config)) {
     subscriptionState.cd2Health = null
-    subscriptionState.cd2HealthError = '配置未完成'
+    subscriptionState.cd2HealthError = window.i18n.t('subscription__health_cd2_incomplete')
     cd2Promise = Promise.resolve()
   } else {
     cd2Promise = checkSubscriptionCd2Health()
@@ -148,6 +152,12 @@ export const removeSubscription = async(id: string) => {
 export const saveSubscriptionConfig = async(input: LX.Subscription.ConfigUpdate) => {
   subscriptionState.config = await updateSubscriptionConfigRemote(input)
   subscriptionState.dashboard = await getSubscriptionDashboard()
+}
+
+/** 设置页需要展示订阅配置；订阅功能未开启时服务不会初始化，这里单独把配置读出来 */
+export const ensureSubscriptionConfig = async() => {
+  if (subscriptionState.config) return
+  subscriptionState.config = await getSubscriptionConfig()
 }
 
 export const testSubscriptionCd2 = async() => {
@@ -337,7 +347,7 @@ export const processSubscriptionQueue = async() => {
         await refreshSubscriptionState()
         return
       }
-      const created = await createDownloadTasks([task.musicInfo], 'flac24bit', undefined, task.id)
+      const created = await createDownloadTasks([toRaw(task.musicInfo)], 'flac24bit', undefined, task.id)
       if (created.length) {
         await updateSubscriptionTask({
           id: task.id,
@@ -353,9 +363,94 @@ export const processSubscriptionQueue = async() => {
   }
 }
 
-const uploadTaskMissingTimeout = 10 * 60_000
+// CD2 复制完成后，允许传输任务在这段时间内还没被关联上；超过后转入「待确认」并持续复查，
+// 但绝不标记为失败——本地成品仍在，重新下载没有意义，需求文档也要求此时不清理、不倒计时。
+const uploadConfirmGraceTime = 10 * 60_000
 const cleanupDelay = 20 * 60_000
 let maintenanceRunning = false
+
+const uploadPollingStatuses: LX.Subscription.TaskStatus[] = ['uploading', 'upload_unconfirmed']
+
+/**
+ * 复查单个上传任务的 CD2 状态，返回是否发生了状态变化。
+ * 所有无法取得明确结论的情况（关联不到传输任务、gRPC 不可用、配置异常）都停在
+ * `upload_unconfirmed`，不会退回下载失败，也不会启动 20 分钟延迟清理。
+ */
+const syncUploadTaskStatus = async(task: LX.Subscription.Task): Promise<boolean> => {
+  try {
+    const status = await getSubscriptionCd2UploadStatus(task.id)
+    if (status.state == 'unconfirmed') {
+      const waited = Date.now() - (task.uploadStartedAt ?? task.updatedAt)
+      if (task.status == 'upload_unconfirmed') {
+        if (task.failureReason == status.message) return false
+        await updateSubscriptionTask({ id: task.id, failureReason: status.message, speed: '' })
+        return true
+      }
+      if (waited < uploadConfirmGraceTime) return false
+      await updateSubscriptionTask({
+        id: task.id,
+        status: 'upload_unconfirmed',
+        failureReason: status.message,
+        speed: '',
+      })
+      return true
+    }
+    if (status.state == 'failed') {
+      await updateSubscriptionTask({
+        id: task.id,
+        status: 'failed',
+        failureReason: `CD2 上传失败：${status.message}`,
+        progress: status.progress,
+        speed: '',
+      })
+      return true
+    }
+    if (status.state == 'running') {
+      // 进度没动就不写库：任务列表按 updated_at 排序，无谓的写入会让行不停重排
+      if (task.status == 'uploading' && task.failureReason == null && Math.abs(task.progress - status.progress) < 0.05) return false
+      await updateSubscriptionTask({
+        id: task.id,
+        status: 'uploading',
+        progress: status.progress,
+        failureReason: null,
+        speed: '',
+      })
+      return true
+    }
+    if (!task.cloudPath || !task.fileVerifiedQuality) throw new Error('上传任务缺少目标路径或本地复核音质')
+    const confirmedAt = Date.now()
+    await confirmSubscriptionUpload({
+      taskId: task.id,
+      cloudPath: task.cloudPath,
+      cloudQuality: task.fileVerifiedQuality,
+      fileNameFormat: task.fileNameFormat?.length ? task.fileNameFormat : appSetting['download.fileName'],
+      confirmedAt,
+      cleanupAt: confirmedAt + cleanupDelay,
+    })
+    return true
+  } catch (err) {
+    // 查询链路本身出错同样属于「无法取得明确成功状态」，按需求文档不清理本地文件、不倒计时
+    const message = err instanceof Error ? err.message : String(err)
+    if (task.status == 'upload_unconfirmed' && task.failureReason == message) return false
+    await updateSubscriptionTask({
+      id: task.id,
+      status: 'upload_unconfirmed',
+      failureReason: message,
+      speed: '',
+    })
+    return true
+  }
+}
+
+/** 手动触发单个任务的上传状态复查 */
+export const recheckSubscriptionUpload = async(task: LX.Subscription.Task) => {
+  const current = (await getSubscriptionTasks()).find(item => item.id == task.id)
+  if (!current) throw new Error('任务不存在')
+  if (!uploadPollingStatuses.includes(current.status)) throw new Error('该任务当前不处于等待 CD2 确认的阶段')
+  await syncUploadTaskStatus(current)
+  await refreshSubscriptionState()
+  return subscriptionState.tasks.find(item => item.id == task.id) ?? current
+}
 
 export const processSubscriptionMaintenance = async() => {
   if (maintenanceRunning) return
@@ -363,47 +458,8 @@ export const processSubscriptionMaintenance = async() => {
   let changed = false
   try {
     const currentTasks = await getSubscriptionTasks()
-    const now = Date.now()
-    for (const task of currentTasks.filter(item => item.status == 'uploading')) {
-      try {
-        const status = await getSubscriptionCd2UploadStatus(task.id)
-        if (status.state == 'missing') {
-          if (now - (task.uploadStartedAt ?? task.updatedAt) >= uploadTaskMissingTimeout) {
-            await updateSubscriptionTask({ id: task.id, status: 'failed', failureReason: status.message, speed: '' })
-            changed = true
-          }
-          continue
-        }
-        if (status.state == 'failed') {
-          await updateSubscriptionTask({ id: task.id, status: 'failed', failureReason: `CD2 上传失败：${status.message}`, progress: status.progress, speed: '' })
-          changed = true
-          continue
-        }
-        if (status.state == 'running') {
-          await updateSubscriptionTask({ id: task.id, progress: status.progress, speed: '' })
-          changed = true
-          continue
-        }
-        if (!task.cloudPath || !task.fileVerifiedQuality) throw new Error('上传任务缺少目标路径或本地复核音质')
-        const confirmedAt = Date.now()
-        await confirmSubscriptionUpload({
-          taskId: task.id,
-          cloudPath: task.cloudPath,
-          cloudQuality: task.fileVerifiedQuality,
-          fileNameFormat: task.fileNameFormat || appSetting['download.fileName'],
-          confirmedAt,
-          cleanupAt: confirmedAt + cleanupDelay,
-        })
-        changed = true
-      } catch (err) {
-        await updateSubscriptionTask({
-          id: task.id,
-          status: 'failed',
-          failureReason: err instanceof Error ? err.message : String(err),
-          speed: '',
-        })
-        changed = true
-      }
+    for (const task of currentTasks.filter(item => uploadPollingStatuses.includes(item.status))) {
+      if (await syncUploadTaskStatus(task)) changed = true
     }
 
     const tasksAfterUpload = changed ? await getSubscriptionTasks() : currentTasks
@@ -501,6 +557,7 @@ const runDueStructureValidation = async() => {
   const config = subscriptionState.config ?? await getSubscriptionConfig()
   const interval = config.structureIntervalMinutes
   if (!config.syncToCd2 || interval == null || !config.structureRootPath.trim()) return
+  if (!isCd2Configured(config)) return
   if (config.structureLastRunAt != null && Date.now() - config.structureLastRunAt < interval * 60_000) return
   // eslint-disable-next-line require-atomic-updates
   structureValidationRunning = true
@@ -521,7 +578,9 @@ const runDueSubscriptionBackup = async() => {
   if (backupRunning) return
   const config = subscriptionState.config ?? await getSubscriptionConfig()
   const interval = config.backupIntervalMinutes
-  if (!config.syncToCd2 || interval == null) return
+  // backupLastAt 一直是空，调度器每 60 秒就会重试一次；配置没填全时必然失败，
+  // 只会刷错误日志并反复发起注定失败的 gRPC 连接，所以这里直接跳过
+  if (!config.syncToCd2 || interval == null || !isCd2Configured(config)) return
   if (config.backupLastAt != null && Date.now() - config.backupLastAt < interval * 60_000) return
   // eslint-disable-next-line require-atomic-updates
   backupRunning = true
@@ -565,6 +624,8 @@ const reconcileSubscriptionDownloads = async(canResume = !subscriptionState.conf
 }
 
 export const initSubscriptionService = async() => {
+  // 与“启用下载功能”一致：未开启时整个订阅功能保持关闭，不启动任何调度与自动同步
+  if (!appSetting['subscription.enable']) return
   await getDownloadList()
   await refreshSubscriptionState()
   if (['collecting', 'running'].includes(subscriptionState.calibrationRun?.status ?? '')) {
@@ -578,7 +639,7 @@ export const initSubscriptionService = async() => {
   const resumableDownloads = downloadList.filter(item => {
     if (!item.metadata.subscriptionTaskId || item.isComplate || !canResumeSubscriptionDownloads) return false
     const task = subscriptionState.tasks.find(task => task.id == item.metadata.subscriptionTaskId)
-    return !!task && !['failed', 'disk_paused', 'quality_skipped', 'local_completed', 'uploaded'].includes(task.status)
+    return !!task && !['failed', 'disk_paused', 'quality_skipped', 'local_completed', 'upload_unconfirmed', 'uploaded'].includes(task.status)
   })
   if (resumableDownloads.length) await startDownloadTasks(resumableDownloads)
   if (canResumeSubscriptionDownloads) {
@@ -602,4 +663,16 @@ export const initSubscriptionService = async() => {
   maintenanceTimer ??= setInterval(() => {
     void processSubscriptionMaintenance()
   }, 10_000)
+}
+
+/** 关闭订阅功能时停止调度与维护循环；进行中的下载不会被强制中断，与原版下载开关的行为一致 */
+export const stopSubscriptionService = () => {
+  if (schedulerTimer) {
+    clearInterval(schedulerTimer)
+    schedulerTimer = null
+  }
+  if (maintenanceTimer) {
+    clearInterval(maintenanceTimer)
+    maintenanceTimer = null
+  }
 }
