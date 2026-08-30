@@ -68,6 +68,14 @@ dd
       v-for="item in lrcFormatList" :id="`setting_download_lrcFormat_${item.id}`" :key="item.id"
       name="setting_download_lrcFormat" need :model-value="appSetting['download.lrcFormat']" :value="item.id" :label="item.name"
       @update:model-value="updateSetting({'download.lrcFormat': $event})")
+dd(:aria-label="$t('setting__download_cd2_sync')")
+  h3#download_cd2_sync {{ $t('setting__download_cd2_sync') }}
+  div
+    base-checkbox.gap-left(
+      v-for="item in cd2SyncModes" :id="`setting_download_cd2Sync_${item.value}`" :key="item.value"
+      name="setting_download_cd2Sync" need :model-value="appSetting['download.cd2SyncMode']" :value="item.value" :label="item.name"
+      @update:model-value="updateSetting({'download.cd2SyncMode': $event})")
+    .p.small.tip {{ $t('setting__download_cd2_sync_tip') }}
 </template>
 
 <script>
@@ -117,6 +125,14 @@ export default {
       ]
     })
 
+    const cd2SyncModes = computed(() => {
+      return [
+        { value: 'off', name: t('setting__download_cd2_sync_off') },
+        { value: 'keep', name: t('setting__download_cd2_sync_keep') },
+        { value: 'clean', name: t('setting__download_cd2_sync_clean') },
+      ]
+    })
+
     return {
       appSetting,
       updateSetting,
@@ -124,6 +140,7 @@ export default {
       handleChangeSavePath,
       musicNames,
       lrcFormatList,
+      cd2SyncModes,
       maxNums,
       handleUpdateMaxNum,
     }

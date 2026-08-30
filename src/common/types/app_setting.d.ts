@@ -700,6 +700,11 @@ declare global {
        * 订阅歌曲下载临时目录；留空时使用原版下载目录
        */
       'subscription.tempPath': string
+
+      /**
+       * 手动下载完成后同步到 CD2 的模式
+       */
+      'download.cd2SyncMode': 'off' | 'keep' | 'clean'
     }
   }
 

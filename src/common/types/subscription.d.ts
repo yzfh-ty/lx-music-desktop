@@ -312,6 +312,20 @@ declare namespace LX {
       createdAt: number
     }
 
+    interface ManualSyncParams {
+      musicKey: string
+      localPath: string
+      fileName: string
+      quality: Quality
+      deleteLocal: boolean
+    }
+
+    interface ManualSyncResult {
+      confirmed: boolean
+      skipped: boolean
+      cleaned: boolean
+    }
+
     interface HistoryItem {
       id: number
       taskId: string

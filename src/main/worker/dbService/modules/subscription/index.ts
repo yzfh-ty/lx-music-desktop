@@ -823,6 +823,16 @@ export const setSubscriptionSyncError = (id: string, message: string): void => {
   `).run(message, now, now, id)
 }
 
+export const getSubscriptionLibraryEntry = (musicKey: string): {
+  musicKey: string
+  cloudQuality: LX.Subscription.Quality | null
+  cloudPath: string | null
+} | null => {
+  const row = getDB().prepare('SELECT music_key, cloud_quality, cloud_path FROM subscription_library WHERE music_key = ?')
+    .get(musicKey) as { music_key: string, cloud_quality: LX.Subscription.Quality | null, cloud_path: string | null } | undefined
+  return row ? { musicKey: row.music_key, cloudQuality: row.cloud_quality, cloudPath: row.cloud_path } : null
+}
+
 export const getSubscriptionTasks = (status?: LX.Subscription.TaskStatus): LX.Subscription.Task[] => {
   const rows = status
     ? getDB().prepare(`${taskSelect} WHERE t.status = ? ORDER BY t.updated_at DESC`).all(status)

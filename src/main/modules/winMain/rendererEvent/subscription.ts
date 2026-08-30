@@ -172,6 +172,36 @@ export default () => {
       cloudPath: task.cloudPath,
     })
   })
+  const manualSyncQualityRank: Record<string, number> = { '128k': 1, '320k': 2, flac: 3, flac24bit: 4 }
+  mainHandle<{
+    musicKey: string
+    localPath: string
+    fileName: string
+    quality: LX.Subscription.Quality
+    deleteLocal: boolean
+  }, LX.Subscription.ManualSyncResult>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_cd2_manual_sync, async({ params }) => {
+    const config = await global.lx.worker.dbService.getSubscriptionConfig()
+    if (!config.cd2RootPath.trim() || !config.cd2GrpcUrl.trim() || !config.cd2ApiToken.trim()) {
+      throw new Error('请先在「设置 → 订阅设置」中配置 CD2 音乐库与连接信息')
+    }
+    // 去重：同一首歌已在云端且音质不低于本地下载音质时跳过上传
+    const entry = await global.lx.worker.dbService.getSubscriptionLibraryEntry(params.musicKey)
+    if (entry?.cloudPath && entry.cloudQuality && manualSyncQualityRank[params.quality] <= manualSyncQualityRank[entry.cloudQuality]) {
+      return { confirmed: true, skipped: true, cleaned: false }
+    }
+    const copied = await copySubscriptionFileToCd2({ config, localPath: params.localPath, currentCloudPath: null, retryCloudPath: null })
+    if (!params.deleteLocal) return { confirmed: true, skipped: false, cleaned: false }
+    // 需要删除本地文件：必须等到 CD2 明确确认上传成功，否则保留本地
+    let status = await getSubscriptionCd2UploadStatus({ config, localPath: params.localPath, cloudPath: copied.cloudPath })
+    const deadline = Date.now() + 5 * 60_000
+    while (status.state == 'unconfirmed' && Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 10_000))
+      status = await getSubscriptionCd2UploadStatus({ config, localPath: params.localPath, cloudPath: copied.cloudPath })
+    }
+    if (status.state != 'success') return { confirmed: false, skipped: false, cleaned: false }
+    await cleanupSubscriptionLocalFile({ config, localPath: params.localPath, cloudPath: copied.cloudPath })
+    return { confirmed: true, skipped: false, cleaned: true }
+  })
   mainHandle<string>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_cd2_cleanup_local, async({ params: taskId }) => {
     const task = (await global.lx.worker.dbService.getSubscriptionTasks()).find(item => item.id == taskId)
     if (!task?.localPath || !task.cloudPath) throw new Error('清理任务缺少本地或 CD2 目标路径')

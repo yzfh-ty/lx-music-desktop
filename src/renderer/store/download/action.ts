@@ -7,6 +7,7 @@ import {
   copySubscriptionToCd2,
   getSubscriptionTasks,
   updateSubscriptionTask,
+  syncManualDownloadToCd2,
 } from '@renderer/utils/ipc'
 import {
   downloadList,
@@ -242,6 +243,30 @@ const markSubscriptionDownloadSkipped = async(downloadInfo: LX.Download.ListItem
   }
 }
 
+// 手动下载的 CD2 同步：上传到 CD2 音乐库根目录，按设置决定是否清理本地文件；
+// 失败只反映在下载列表状态文本上，本地文件始终保留
+const syncManualDownloadCd2 = async(downloadInfo: LX.Download.ListItem, deleteLocal: boolean) => {
+  try {
+    setStatusText(downloadInfo, window.i18n.t('download_status_cd2_syncing'))
+    const result = await syncManualDownloadToCd2({
+      musicKey: `${downloadInfo.metadata.musicInfo.source}:${downloadInfo.metadata.musicInfo.id}`,
+      localPath: downloadInfo.metadata.filePath,
+      fileName: downloadInfo.metadata.fileName,
+      quality: downloadInfo.metadata.quality as LX.Subscription.Quality,
+      deleteLocal,
+    })
+    setStatusText(downloadInfo, result.skipped
+      ? window.i18n.t('download_status_cd2_skipped')
+      : result.cleaned
+        ? window.i18n.t('download_status_cd2_done_cleaned')
+        : window.i18n.t('download_status_cd2_done'))
+  } catch (err) {
+    setStatusText(downloadInfo, window.i18n.t('download_status_cd2_failed', {
+      message: err instanceof Error ? err.message : String(err),
+    }))
+  }
+}
+
 const skipSubscriptionDownload = async(downloadInfo: LX.Download.ListItem, reason: string) => {
   await markSubscriptionDownloadSkipped(downloadInfo, reason)
   await removeSubscriptionDownloadEntry(downloadInfo)
@@ -470,6 +495,10 @@ const handleStartTask = async(downloadInfo: LX.Download.ListItem) => {
         void window.lx.worker.download.removeTask(downloadInfo.id)
         runingTask.delete(downloadInfo.id)
         setStatus(downloadInfo, DOWNLOAD_STATUS.COMPLETED)
+        // 手动下载的 CD2 同步：上传并保留本地，或上传后清理本地（在下载设置中配置）
+        if (appSetting['download.cd2SyncMode'] != 'off') {
+          void syncManualDownloadCd2(downloadInfo, appSetting['download.cd2SyncMode'] == 'clean')
+        }
         void checkStartTask()
         break
       case 'refreshUrl':

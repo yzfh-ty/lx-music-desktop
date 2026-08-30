@@ -905,6 +905,15 @@ export const getSubscriptionCd2UploadStatus = async(taskId: string): Promise<LX.
 export const cleanupSubscriptionLocalFile = async(taskId: string): Promise<void> => {
   await rendererInvoke(WIN_MAIN_RENDERER_EVENT_NAME.subscription_cd2_cleanup_local, taskId)
 }
+export const syncManualDownloadToCd2 = async(input: {
+  musicKey: string
+  localPath: string
+  fileName: string
+  quality: LX.Subscription.Quality
+  deleteLocal: boolean
+}): Promise<LX.Subscription.ManualSyncResult> => {
+  return rendererInvoke<LX.Subscription.ManualSyncParams, LX.Subscription.ManualSyncResult>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_cd2_manual_sync, input)
+}
 export const removeSubscriptionOldCloudFile = async(taskId: string): Promise<void> => {
   await rendererInvoke(WIN_MAIN_RENDERER_EVENT_NAME.subscription_cd2_remove_old, taskId)
 }

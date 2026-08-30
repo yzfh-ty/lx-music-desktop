@@ -126,6 +126,7 @@ const defaultSetting: LX.AppSetting = {
   'download.isEmbedLyricT': false,
   'download.isEmbedLyricR': false,
   'download.isUseOtherSource': false,
+  'download.cd2SyncMode': 'off',
 
   'subscription.enable': false,
   'subscription.tempPath': '',

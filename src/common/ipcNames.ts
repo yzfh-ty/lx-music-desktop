@@ -175,6 +175,7 @@ const modules = {
     subscription_cd2_cleanup_local: 'subscription_cd2_cleanup_local',
     subscription_cd2_remove_old: 'subscription_cd2_remove_old',
     subscription_cd2_health: 'subscription_cd2_health',
+    subscription_cd2_manual_sync: 'subscription_cd2_manual_sync',
     subscription_calibration_scan: 'subscription_calibration_scan',
     subscription_calibration_run_get: 'subscription_calibration_run_get',
     subscription_calibration_resume: 'subscription_calibration_resume',
