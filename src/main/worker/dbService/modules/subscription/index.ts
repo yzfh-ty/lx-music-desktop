@@ -312,6 +312,9 @@ export const getSubscriptions = (): LX.Subscription.ListItem[] => {
   return (getDB().prepare('SELECT * FROM subscription_list ORDER BY created_at DESC').all() as SubscriptionRow[]).map(toSubscription)
 }
 
+// 订阅同步周期下限：避免高频轮询对音源接口造成压力
+const MIN_SYNC_INTERVAL_MINUTES = 10
+
 export const getDueSubscriptions = (now: number): LX.Subscription.ListItem[] => {
   return (getDB().prepare(`
     SELECT * FROM subscription_list
@@ -326,8 +329,8 @@ export const createSubscription = (input: LX.Subscription.ListCreate): LX.Subscr
   const listId = input.listId.trim()
   const name = input.name.trim()
   if (!source || !listId || !name) throw new Error('订阅平台、歌单 ID 和名称不能为空')
-  if (input.intervalMinutes != null && (!Number.isInteger(input.intervalMinutes) || input.intervalMinutes <= 0)) {
-    throw new Error('同步周期必须是正整数分钟')
+  if (input.intervalMinutes != null && (!Number.isInteger(input.intervalMinutes) || input.intervalMinutes < MIN_SYNC_INTERVAL_MINUTES)) {
+    throw new Error('同步周期不能小于 10 分钟')
   }
   const now = Date.now()
   const item: LX.Subscription.ListItem = {
@@ -339,7 +342,7 @@ export const createSubscription = (input: LX.Subscription.ListCreate): LX.Subscr
     intervalMinutes: input.intervalMinutes,
     enabled: true,
     lastSyncAt: null,
-    nextSyncAt: input.intervalMinutes == null ? null : now + input.intervalMinutes * 60_000,
+    nextSyncAt: input.intervalMinutes == null ? null : now + Math.max(input.intervalMinutes, MIN_SYNC_INTERVAL_MINUTES) * 60_000,
     lastError: null,
     createdAt: now,
     updatedAt: now,
@@ -367,11 +370,11 @@ export const updateSubscription = (input: LX.Subscription.ListUpdate): LX.Subscr
   const current = toSubscription(row)
   const now = Date.now()
   const next = { ...current, ...input, updatedAt: now }
-  if (next.intervalMinutes != null && (!Number.isInteger(next.intervalMinutes) || next.intervalMinutes <= 0)) {
-    throw new Error('同步周期必须是正整数分钟')
+  if (next.intervalMinutes != null && (!Number.isInteger(next.intervalMinutes) || next.intervalMinutes < MIN_SYNC_INTERVAL_MINUTES)) {
+    throw new Error('同步周期不能小于 10 分钟')
   }
   if ('intervalMinutes' in input || ('enabled' in input && input.enabled)) {
-    next.nextSyncAt = next.enabled && next.intervalMinutes != null ? now + next.intervalMinutes * 60_000 : null
+    next.nextSyncAt = next.enabled && next.intervalMinutes != null ? now + Math.max(next.intervalMinutes, MIN_SYNC_INTERVAL_MINUTES) * 60_000 : null
   } else if ('enabled' in input && !input.enabled) {
     next.nextSyncAt = null
   }
@@ -809,7 +812,7 @@ export const ingestSubscriptionSync = (input: LX.Subscription.SyncInput): LX.Sub
     db.prepare(`
       UPDATE subscription_list SET name = COALESCE(?, name), last_sync_at = ?,
         next_sync_at = ?, last_error = NULL, updated_at = ? WHERE id = ?
-    `).run(input.subscriptionName?.trim() ?? null, input.syncedAt, interval == null ? null : input.syncedAt + interval * 60_000, input.syncedAt, input.subscriptionId)
+    `).run(input.subscriptionName?.trim() ?? null, input.syncedAt, interval == null ? null : input.syncedAt + Math.max(interval, MIN_SYNC_INTERVAL_MINUTES) * 60_000, input.syncedAt, input.subscriptionId)
   })()
   return result
 }
@@ -818,7 +821,7 @@ export const setSubscriptionSyncError = (id: string, message: string): void => {
   const now = Date.now()
   getDB().prepare(`
     UPDATE subscription_list SET last_error = ?,
-      next_sync_at = CASE WHEN interval_minutes IS NULL THEN NULL ELSE ? + interval_minutes * 60000 END,
+      next_sync_at = CASE WHEN interval_minutes IS NULL THEN NULL ELSE ? + MAX(interval_minutes, 10) * 60000 END,
       updated_at = ? WHERE id = ?
   `).run(message, now, now, id)
 }

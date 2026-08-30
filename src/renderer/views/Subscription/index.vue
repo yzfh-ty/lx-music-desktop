@@ -371,7 +371,7 @@ const cancelSubscriptionEdit = () => { editingSubscriptionId.value = null }
 const handleSaveSubscriptionEdit = async() => run(async() => {
   if (!editingSubscriptionId.value) return
   const interval = subscriptionEdit.interval.trim() ? Number(subscriptionEdit.interval) : null
-  if (interval != null && (!Number.isInteger(interval) || interval <= 0)) throw new Error(t('subscription__edit_interval_invalid'))
+  if (interval != null && (!Number.isInteger(interval) || interval < 10)) throw new Error(t('subscription__edit_interval_invalid'))
   await updateSubscription({ id: editingSubscriptionId.value, name: subscriptionEdit.name, intervalMinutes: interval })
   editingSubscriptionId.value = null
 }, () => t('subscription__edit_saved'))
