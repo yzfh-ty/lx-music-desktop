@@ -19,6 +19,7 @@ const repoRoot = path.resolve(__dirname, '..')
 
 /** 本分支新增/重做的、使用 <script lang="ts" setup> 的组件 */
 const files = [
+  'src/renderer/views/Setting/components/SettingSubscription.vue',
   'src/renderer/views/Subscription/index.vue',
   'src/renderer/views/Subscription/components/ListPicker.vue',
 ]

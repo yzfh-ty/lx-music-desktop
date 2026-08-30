@@ -909,8 +909,10 @@ export const syncManualDownloadToCd2 = async(input: {
   musicKey: string
   localPath: string
   fileName: string
+  fileNameFormat: string
   quality: LX.Subscription.Quality
   deleteLocal: boolean
+  musicInfo: LX.Music.MusicInfoOnline
 }): Promise<LX.Subscription.ManualSyncResult> => {
   return rendererInvoke<LX.Subscription.ManualSyncParams, LX.Subscription.ManualSyncResult>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_cd2_manual_sync, input)
 }

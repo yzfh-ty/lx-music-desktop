@@ -316,8 +316,10 @@ declare namespace LX {
       musicKey: string
       localPath: string
       fileName: string
+      fileNameFormat: string
       quality: Quality
       deleteLocal: boolean
+      musicInfo: LX.Music.MusicInfoOnline
     }
 
     interface ManualSyncResult {

@@ -53,6 +53,71 @@ const setup = async(opts = {}) => {
   }
 }
 
+test('手动清理同步会同时等待 running 与 unconfirmed，直到明确成功', async() => {
+  const scripted = [
+    { state: 'running', progress: 10, message: 'Transfer' },
+    { state: 'unconfirmed', progress: 100, message: '等待云端文件' },
+    { state: 'success', progress: 100, message: 'Finish' },
+  ]
+  let calls = 0
+  const result = await cd2.waitForSubscriptionCd2Upload(async() => {
+    calls++
+    return scripted.shift()
+  }, 1_000, 0)
+
+  assert.equal(result.state, 'success')
+  assert.equal(calls, 3)
+})
+
+test('手动下载“上传并保留”走真实复制与 gRPC 确认链路，并保留本地音频和歌词', async(t) => {
+  const c = await setup({ copiedToMount: false })
+  t.after(() => c.teardown())
+  const localLrcPath = c.localPath.replace(/\.flac$/i, '.lrc')
+  fs.writeFileSync(localLrcPath, '[00:00.00]test')
+
+  const copied = await cd2.copySubscriptionFileToCd2({
+    config: c.config,
+    localPath: c.localPath,
+    currentCloudPath: null,
+  })
+  c.server.putCloudFile(copied.expectedDestPath, { size: FILE_SIZE, isCloudFile: true, isLocal: false })
+  const status = await cd2.waitForSubscriptionCd2Upload(() => cd2.getSubscriptionCd2UploadStatus({
+    config: c.config,
+    localPath: c.localPath,
+    cloudPath: copied.cloudPath,
+  }), 1_000, 0)
+
+  assert.equal(status.state, 'success')
+  assert.equal(fs.existsSync(c.localPath), true)
+  assert.equal(fs.existsSync(localLrcPath), true)
+  assert.equal(fs.existsSync(copied.cloudPath), true)
+  assert.equal(fs.existsSync(copied.cloudPath.replace(/\.flac$/i, '.lrc')), true)
+})
+
+test('手动下载“上传后清理”只在云端确认后删除本地音频和歌词', async(t) => {
+  const c = await setup({ copiedToMount: false })
+  t.after(() => c.teardown())
+  const localLrcPath = c.localPath.replace(/\.flac$/i, '.lrc')
+  fs.writeFileSync(localLrcPath, '[00:00.00]test')
+
+  const copied = await cd2.copySubscriptionFileToCd2({
+    config: c.config,
+    localPath: c.localPath,
+    currentCloudPath: null,
+  })
+  c.server.putCloudFile(copied.expectedDestPath, { size: FILE_SIZE, isCloudFile: true, isLocal: false })
+  await cd2.cleanupSubscriptionLocalFile({
+    config: c.config,
+    localPath: c.localPath,
+    cloudPath: copied.cloudPath,
+  })
+
+  assert.equal(fs.existsSync(c.localPath), false)
+  assert.equal(fs.existsSync(localLrcPath), false)
+  assert.equal(fs.existsSync(copied.cloudPath), true)
+  assert.equal(fs.existsSync(copied.cloudPath.replace(/\.flac$/i, '.lrc')), true)
+})
+
 // ---------------------------------------------------------------- 关联与进度
 
 test('destPath 精确匹配：CloudDrive2 预处理阶段报告 size=0 也要能关联上（回归：旧实现会误判为未关联）', async(t) => {

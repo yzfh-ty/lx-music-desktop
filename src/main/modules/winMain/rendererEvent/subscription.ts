@@ -8,6 +8,7 @@ import {
   copySubscriptionFileToCd2,
   getSubscriptionCd2UploadStatus,
   removeSubscriptionOldCloudFile,
+  waitForSubscriptionCd2Upload,
 } from '@main/modules/subscription/cd2'
 import {
   collectSubscriptionCalibrationFiles,
@@ -177,8 +178,10 @@ export default () => {
     musicKey: string
     localPath: string
     fileName: string
+    fileNameFormat: string
     quality: LX.Subscription.Quality
     deleteLocal: boolean
+    musicInfo: LX.Music.MusicInfoOnline
   }, LX.Subscription.ManualSyncResult>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_cd2_manual_sync, async({ params }) => {
     const config = await global.lx.worker.dbService.getSubscriptionConfig()
     if (!config.cd2RootPath.trim() || !config.cd2GrpcUrl.trim() || !config.cd2ApiToken.trim()) {
@@ -189,16 +192,29 @@ export default () => {
     if (entry?.cloudPath && entry.cloudQuality && manualSyncQualityRank[params.quality] <= manualSyncQualityRank[entry.cloudQuality]) {
       return { confirmed: true, skipped: true, cleaned: false }
     }
-    const copied = await copySubscriptionFileToCd2({ config, localPath: params.localPath, currentCloudPath: null, retryCloudPath: null })
-    if (!params.deleteLocal) return { confirmed: true, skipped: false, cleaned: false }
-    // 需要删除本地文件：必须等到 CloudDrive2 明确确认上传成功，否则保留本地
-    let status = await getSubscriptionCd2UploadStatus({ config, localPath: params.localPath, cloudPath: copied.cloudPath })
-    const deadline = Date.now() + 5 * 60_000
-    while (status.state == 'unconfirmed' && Date.now() < deadline) {
-      await new Promise(resolve => setTimeout(resolve, 10_000))
-      status = await getSubscriptionCd2UploadStatus({ config, localPath: params.localPath, cloudPath: copied.cloudPath })
-    }
+    const copied = await copySubscriptionFileToCd2({
+      config,
+      localPath: params.localPath,
+      currentCloudPath: entry?.cloudPath ?? null,
+      retryCloudPath: null,
+    })
+    // 只有 CloudDrive2 明确确认上传成功后才记录去重信息；清理模式同样以此为删除前提
+    const status = await waitForSubscriptionCd2Upload(() => getSubscriptionCd2UploadStatus({
+      config,
+      localPath: params.localPath,
+      cloudPath: copied.cloudPath,
+    }))
+    if (status.state == 'failed') throw new Error(status.message)
     if (status.state != 'success') return { confirmed: false, skipped: false, cleaned: false }
+    await global.lx.worker.dbService.recordManualDownloadSync({
+      musicKey: params.musicKey,
+      musicInfo: params.musicInfo,
+      cloudPath: copied.cloudPath,
+      cloudQuality: params.quality,
+      fileNameFormat: params.fileNameFormat,
+      confirmedAt: Date.now(),
+    })
+    if (!params.deleteLocal) return { confirmed: true, skipped: false, cleaned: false }
     await cleanupSubscriptionLocalFile({ config, localPath: params.localPath, cloudPath: copied.cloudPath })
     return { confirmed: true, skipped: false, cleaned: true }
   })

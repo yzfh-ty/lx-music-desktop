@@ -124,3 +124,40 @@ test('旧版本会把 Skipped（秒传成功）一律判成失败', async(t) => 
   const result = await c.status()
   assert.equal(result.state, 'failed')
 })
+
+test('手动下载必须等元数据和歌词完成后才能开始 CloudDrive2 同步', () => {
+  const source = fs.readFileSync(path.join(repoRoot, 'src/renderer/store/download/action.ts'), 'utf8')
+  const start = source.indexOf('const finishManualDownload = async')
+  const end = source.indexOf('\nconst skipSubscriptionDownload', start)
+  assert.notEqual(start, -1, '手动下载收尾函数不存在')
+  assert.notEqual(end, -1, '手动下载收尾函数边界不存在')
+  const block = source.slice(start, end)
+  const metadata = block.indexOf('await Promise.all([saveMeta(downloadInfo), downloadLyric(downloadInfo)])')
+  const sync = block.indexOf('await syncManualDownloadCd2(')
+  assert.notEqual(metadata, -1, '元数据与歌词没有被等待')
+  assert.ok(sync > metadata, 'CloudDrive2 同步必须发生在元数据与歌词处理之后')
+})
+
+test('手动下载选择“不同步”时不会进入 CloudDrive2 分支', () => {
+  const source = fs.readFileSync(path.join(repoRoot, 'src/renderer/store/download/action.ts'), 'utf8')
+  const start = source.indexOf('const finishManualDownload = async')
+  const end = source.indexOf('\nconst skipSubscriptionDownload', start)
+  assert.notEqual(start, -1, '手动下载收尾函数不存在')
+  assert.notEqual(end, -1, '手动下载收尾函数边界不存在')
+  const block = source.slice(start, end)
+  assert.match(block, /if \(cd2SyncMode != 'off'\) await syncManualDownloadCd2\(downloadInfo, cd2SyncMode == 'clean'\)/)
+})
+
+test('手动同步未确认时不能显示上传完成', () => {
+  const source = fs.readFileSync(path.join(repoRoot, 'src/renderer/store/download/action.ts'), 'utf8')
+  const start = source.indexOf('const syncManualDownloadCd2 = async')
+  const end = source.indexOf('\nconst finishManualDownload', start)
+  const block = source.slice(start, end)
+  assert.match(block, /if \(!result\.confirmed\)[\s\S]*download_status_cd2_timeout/)
+  assert.ok(block.indexOf('if (!result.confirmed)') < block.indexOf('download_status_cd2_done'), '必须先处理未确认结果')
+})
+
+test('数据库 Worker 允许订阅页面的并发 Comlink 请求', () => {
+  const source = fs.readFileSync(path.join(repoRoot, 'src/main/worker/utils/index.ts'), 'utf8')
+  assert.match(source, /worker\.setMaxListeners\(100\)/)
+})

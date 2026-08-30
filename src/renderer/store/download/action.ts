@@ -252,9 +252,15 @@ const syncManualDownloadCd2 = async(downloadInfo: LX.Download.ListItem, deleteLo
       musicKey: `${downloadInfo.metadata.musicInfo.source}:${downloadInfo.metadata.musicInfo.id}`,
       localPath: downloadInfo.metadata.filePath,
       fileName: downloadInfo.metadata.fileName,
+      fileNameFormat: appSetting['download.fileName'],
       quality: downloadInfo.metadata.quality as LX.Subscription.Quality,
       deleteLocal,
+      musicInfo: toRaw(downloadInfo.metadata.musicInfo),
     })
+    if (!result.confirmed) {
+      setStatusText(downloadInfo, window.i18n.t('download_status_cd2_timeout'))
+      return
+    }
     setStatusText(downloadInfo, result.skipped
       ? window.i18n.t('download_status_cd2_skipped')
       : result.cleaned
@@ -265,6 +271,16 @@ const syncManualDownloadCd2 = async(downloadInfo: LX.Download.ListItem, deleteLo
       message: err instanceof Error ? err.message : String(err),
     }))
   }
+}
+
+const finishManualDownload = async(downloadInfo: LX.Download.ListItem, cd2SyncMode: LX.AppSetting['download.cd2SyncMode']) => {
+  try {
+    await Promise.all([saveMeta(downloadInfo), downloadLyric(downloadInfo)])
+  } catch (err) {
+    setStatusText(downloadInfo, err instanceof Error ? err.message : String(err))
+    return
+  }
+  if (cd2SyncMode != 'off') await syncManualDownloadCd2(downloadInfo, cd2SyncMode == 'clean')
 }
 
 const skipSubscriptionDownload = async(downloadInfo: LX.Download.ListItem, reason: string) => {
@@ -490,15 +506,11 @@ const handleStartTask = async(downloadInfo: LX.Download.ListItem) => {
           break
         }
         downloadInfo.progress = 100
-        void saveMeta(downloadInfo)
-        void downloadLyric(downloadInfo)
         void window.lx.worker.download.removeTask(downloadInfo.id)
         runingTask.delete(downloadInfo.id)
         setStatus(downloadInfo, DOWNLOAD_STATUS.COMPLETED)
-        // 手动下载的 CloudDrive2 同步：上传并保留本地，或上传后清理本地（在下载设置中配置）
-        if (appSetting['download.cd2SyncMode'] != 'off') {
-          void syncManualDownloadCd2(downloadInfo, appSetting['download.cd2SyncMode'] == 'clean')
-        }
+        // 元数据与歌词写完后再同步，避免 CloudDrive2 复制到未完成的音频或遗漏歌词
+        void finishManualDownload(downloadInfo, appSetting['download.cd2SyncMode'])
         void checkStartTask()
         break
       case 'refreshUrl':
@@ -619,7 +631,7 @@ export const pauseDownloadTasks = async(list: LX.Download.ListItem[]) => {
         break
     }
     if (downloadInfo.metadata.subscriptionTaskId && !downloadInfo.isComplate && downloadInfo.status == DOWNLOAD_STATUS.PAUSE) {
-      void updateSubscriptionTask({
+      await updateSubscriptionTask({
         id: downloadInfo.metadata.subscriptionTaskId,
         status: 'disk_paused',
         pauseOrigin: 'manual',

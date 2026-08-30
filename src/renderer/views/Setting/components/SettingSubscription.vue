@@ -40,7 +40,7 @@ dd.gap-top(:aria-label="$t('setting__subscription_config')")
     .p
       base-btn.btn(min :disabled="busy" @click="handleSave") {{ $t('subscription__setting_save') }}
       base-btn.btn(v-if="form.syncToCd2" min outline :disabled="busy" @click="handleTestCd2") {{ $t('subscription__setting_test_cd2') }}
-      base-btn.btn(v-if="form.syncToCd2" min outline :disabled="busy" @click="handleBackup") {{ $t('subscription__setting_backup') }}
+      base-btn.btn(min outline :disabled="busy" @click="handleBackup") {{ $t('subscription__setting_backup') }}
       base-btn.btn(v-if="state.config?.diskLocked" min outline :disabled="busy" @click="handleUnlockDisk") {{ $t('subscription__disk_unlock') }}
     .p.small(v-if="message") {{ message }}
     template(v-if="tempSongs.length")
@@ -340,6 +340,7 @@ const autoMatchCalibration = async() => {
           singer: record.artist,
           albumName: '',
           interval: formatInterval(record.duration),
+          source: undefined,
         }) as Array<{ source: string, songmid: string, name: string, singer: string }> | null
         const pick = candidates ? pickCandidate(candidates, record.title, record.artist) : null
         if (pick) {

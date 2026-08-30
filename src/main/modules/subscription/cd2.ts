@@ -407,6 +407,20 @@ export const getSubscriptionCd2UploadStatus = async(input: {
   }
 }
 
+export const waitForSubscriptionCd2Upload = async(
+  query: () => Promise<LX.Subscription.Cd2UploadStatus>,
+  timeoutMs = 5 * 60_000,
+  pollIntervalMs = 10_000,
+): Promise<LX.Subscription.Cd2UploadStatus> => {
+  const deadline = Date.now() + timeoutMs
+  let status = await query()
+  while (['running', 'unconfirmed'].includes(status.state) && Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, Math.min(pollIntervalMs, Math.max(0, deadline - Date.now()))))
+    status = await query()
+  }
+  return status
+}
+
 export const cleanupSubscriptionLocalFile = async(input: {
   config: LX.Subscription.Config
   localPath: string

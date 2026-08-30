@@ -836,6 +836,48 @@ export const getSubscriptionLibraryEntry = (musicKey: string): {
   return row ? { musicKey: row.music_key, cloudQuality: row.cloud_quality, cloudPath: row.cloud_path } : null
 }
 
+export const recordManualDownloadSync = (input: {
+  musicKey: string
+  musicInfo: LX.Music.MusicInfoOnline
+  cloudPath: string
+  cloudQuality: LX.Subscription.Quality
+  fileNameFormat: string
+  confirmedAt: number
+}): void => {
+  const musicKey = `${input.musicInfo.source}:${input.musicInfo.id}`
+  if (musicKey != input.musicKey) throw new Error('手动同步歌曲标识与歌曲信息不一致')
+  const config = getSubscriptionConfig()
+  getDB().prepare(`
+    INSERT INTO subscription_library (
+      music_key, source, song_id, name, singer, album_name, duration, music_info,
+      cloud_quality, cloud_path, file_name_format, upload_confirmed_at,
+      record_origin, quality_satisfied, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, 'uploaded', ?, ?, ?)
+    ON CONFLICT(music_key) DO UPDATE SET
+      name = excluded.name, singer = excluded.singer, album_name = excluded.album_name,
+      music_info = excluded.music_info, cloud_quality = excluded.cloud_quality,
+      cloud_path = excluded.cloud_path, file_name_format = excluded.file_name_format,
+      upload_confirmed_at = excluded.upload_confirmed_at, record_origin = 'uploaded',
+      calibration_status = NULL, quality_satisfied = excluded.quality_satisfied,
+      updated_at = excluded.updated_at
+  `).run(
+    musicKey,
+    input.musicInfo.source,
+    String(input.musicInfo.id),
+    input.musicInfo.name,
+    input.musicInfo.singer,
+    input.musicInfo.meta.albumName ?? '',
+    JSON.stringify(input.musicInfo),
+    input.cloudQuality,
+    input.cloudPath,
+    input.fileNameFormat,
+    input.confirmedAt,
+    isSatisfied(input.cloudQuality, config.stopQuality) ? 1 : 0,
+    input.confirmedAt,
+    input.confirmedAt,
+  )
+}
+
 export const getSubscriptionTasks = (status?: LX.Subscription.TaskStatus): LX.Subscription.Task[] => {
   const rows = status
     ? getDB().prepare(`${taskSelect} WHERE t.status = ? ORDER BY t.updated_at DESC`).all(status)

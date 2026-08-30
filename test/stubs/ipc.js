@@ -41,6 +41,7 @@ const state = {
   /** cleanupSubscriptionLocalFile / removeSubscriptionOldCloudFile 的行为 */
   cleanupBehaviour: { throws: null },
   removeOldBehaviour: { throws: null },
+  diskInfo: { path: 'C:\\', freeBytes: 1e12, totalBytes: 2e12, overlapsCd2Root: false },
 }
 
 const reset = () => {
@@ -51,6 +52,11 @@ const reset = () => {
   state.cleanupBehaviour.throws = null
   state.removeOldBehaviour.throws = null
   state.config.syncToCd2 = true
+  state.config.diskLocked = false
+  state.config.diskPausedAt = null
+  state.config.backupIntervalMinutes = null
+  state.config.backupLastAt = null
+  state.diskInfo = { path: 'C:\\', freeBytes: 1e12, totalBytes: 2e12, overlapsCd2Root: false }
 }
 
 const makeTask = (overrides = {}) => ({
@@ -185,7 +191,7 @@ const getSubscriptionCalibrationRecords = async() => []
 const getSubscriptionCalibrationRun = async() => null
 const getSubscriptionStructureValidationRecords = async() => []
 const getSubscriptionHistory = async() => []
-const getSubscriptionDiskInfo = async() => ({ path: 'C:\\', freeBytes: 1e12, totalBytes: 2e12, overlapsCd2Root: false })
+const getSubscriptionDiskInfo = async() => ({ ...state.diskInfo })
 const checkSubscriptionCd2Health = async() => ({ rootPath: 'F:\\', mountPath: 'F:\\', sourceDir: '/115/music', writable: true })
 const unsupported = name => async() => { throw new Error(`测试桩未实现：${name}`) }
 
@@ -213,7 +219,11 @@ module.exports = {
   getSubscriptionHistory,
   getSubscriptionDiskInfo,
   checkSubscriptionCd2Health,
-  backupSubscriptionDatabase: unsupported('backupSubscriptionDatabase'),
+  backupSubscriptionDatabase: async() => {
+    track('backupSubscriptionDatabase')
+    state.config.backupLastAt = Date.now()
+    return { path: 'C:\\subscription-backups\\test.db', createdAt: state.config.backupLastAt }
+  },
   clearSubscriptionHistory: unsupported('clearSubscriptionHistory'),
   createSubscription: unsupported('createSubscription'),
   confirmSubscriptionCalibration: unsupported('confirmSubscriptionCalibration'),

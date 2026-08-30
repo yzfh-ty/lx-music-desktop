@@ -78,6 +78,30 @@ test('真实 schema 能建起来，且 status 列没有 CHECK 约束（新增状
   assert.equal(/CHECK/i.test(sql), false)
 })
 
+test('手动下载上传确认后会写入并更新音乐库去重记录', () => {
+  const musicInfo = {
+    id: 'manual-1', source: 'wy', name: '手动歌曲', singer: '歌手', interval: '03:30',
+    meta: { albumName: '专辑' },
+  }
+  sub.recordManualDownloadSync({
+    musicKey: 'wy:manual-1', musicInfo, cloudPath: 'F:\\手动歌曲.mp3',
+    cloudQuality: '320k', fileNameFormat: '歌名 - 歌手', confirmedAt: now(),
+  })
+
+  assert.deepEqual(sub.getSubscriptionLibraryEntry('wy:manual-1'), {
+    musicKey: 'wy:manual-1', cloudQuality: '320k', cloudPath: 'F:\\手动歌曲.mp3',
+  })
+
+  sub.recordManualDownloadSync({
+    musicKey: 'wy:manual-1', musicInfo, cloudPath: 'F:\\手动歌曲.flac',
+    cloudQuality: 'flac', fileNameFormat: '歌名 - 歌手', confirmedAt: now() + 1,
+  })
+  assert.deepEqual(sub.getSubscriptionLibraryEntry('wy:manual-1'), {
+    musicKey: 'wy:manual-1', cloudQuality: 'flac', cloudPath: 'F:\\手动歌曲.flac',
+  })
+  assert.equal(dbStub.getDB().prepare('SELECT COUNT(*) FROM subscription_library WHERE music_key = ?').pluck().get('wy:manual-1'), 1)
+})
+
 // ------------------------------------------------------------------ 重试入口
 
 test('retrySubscriptionTasks 接受 upload_unconfirmed，并按已有本地成品回到 tagging（重新上传而不是重新下载）', () => {

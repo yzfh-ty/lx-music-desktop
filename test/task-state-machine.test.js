@@ -30,12 +30,20 @@ alias.register({
 
 compileOnce()
 const ipc = require(path.join(stubs, 'ipc.js'))
+const downloadAction = require(path.join(stubs, 'download-action.js'))
+const downloadState = require(path.join(stubs, 'download-state.js'))
+const { appSetting } = require(path.join(stubs, 'setting.js'))
 const store = require(path.join(buildDir, 'renderer/store/subscription/index.js'))
 
 const GRACE = 10 * 60_000
 const CLEANUP_DELAY = 20 * 60_000
 
-const beforeEach = () => { ipc.__reset() }
+const beforeEach = () => {
+  ipc.__reset()
+  downloadAction.reset()
+  downloadState.downloadList.length = 0
+  appSetting['subscription.enable'] = false
+}
 const taskOf = id => ipc.__state.tasks.get(id)
 const historyOf = id => ipc.__state.history.filter(h => h.taskId == id)
 
@@ -332,4 +340,53 @@ test('多个上传任务互不影响，各自按自己的 CloudDrive2 结论走'
   assert.equal(taskOf('ok').status, 'cleanup_wait')
   assert.equal(taskOf('pending').status, 'upload_unconfirmed')
   assert.equal(taskOf('bad').status, 'failed')
+})
+
+// ------------------------------------------------------------ 磁盘保护与服务生命周期
+
+test('磁盘低于阈值时会暂停已经在下载列表中的活动任务', async() => {
+  beforeEach()
+  const task = ipc.__addTask({ status: 'downloading' })
+  ipc.__state.diskInfo.freeBytes = 1
+  downloadState.downloadList.push({
+    id: 'download-1',
+    isComplate: false,
+    status: 'run',
+    metadata: { subscriptionTaskId: task.id },
+  })
+
+  await store.processSubscriptionQueue()
+
+  assert.equal(taskOf(task.id).status, 'disk_paused')
+  assert.equal(taskOf(task.id).pauseOrigin, 'disk')
+  assert.equal(ipc.__state.config.diskLocked, true)
+  assert.equal(downloadAction.calls.some(call => call.name == 'pauseDownloadTasks'), true)
+})
+
+test('本地备份在关闭 CloudDrive2 同步时仍会按计划执行', async() => {
+  beforeEach()
+  appSetting['subscription.enable'] = true
+  ipc.__state.config.syncToCd2 = false
+  ipc.__state.config.backupIntervalMinutes = 10
+
+  await store.initSubscriptionService()
+  store.stopSubscriptionService()
+
+  assert.equal(ipc.__state.calls.some(call => call.name == 'backupSubscriptionDatabase'), true)
+})
+
+test('关闭功能会取消尚未完成的异步初始化', async() => {
+  beforeEach()
+  appSetting['subscription.enable'] = true
+  let release
+  downloadAction.setGetDownloadListBehaviour(() => new Promise(resolve => { release = resolve }))
+
+  const initializing = store.initSubscriptionService()
+  await new Promise(resolve => setImmediate(resolve))
+  appSetting['subscription.enable'] = false
+  store.stopSubscriptionService()
+  release([])
+  await initializing
+
+  assert.equal(ipc.__state.calls.length, 0, '取消后不应继续读取配置、同步或启动备份')
 })

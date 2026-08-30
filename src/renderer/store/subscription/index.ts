@@ -306,48 +306,40 @@ export const processSubscriptionQueue = async() => {
     await refreshSubscriptionState()
     if (!subscriptionState.config || subscriptionState.config.diskLocked) return
     if (subscriptionState.config.syncToCd2 && (subscriptionState.config.calibrationCompletedAt == null || isCalibrationActive())) return
+    const diskGuardStatuses: LX.Subscription.TaskStatus[] = ['pending', 'resolving', 'downloading']
+    const diskGuardTasks = subscriptionState.tasks.filter(task => diskGuardStatuses.includes(task.status))
+    if (diskGuardTasks.length) {
+      const disk = await getSubscriptionDiskInfo().catch(() => null)
+      if (!disk) return
+      const lockReason = disk.overlapsCd2Root
+        ? '下载目录（或订阅临时目录）与 CloudDrive2 音乐库重叠，请修改后手动恢复'
+        : disk.freeBytes < subscriptionState.config.diskThresholdBytes
+          ? '本地下载磁盘剩余空间低于保护阈值'
+          : null
+      if (lockReason) {
+        await saveSubscriptionConfig({ diskLocked: true, diskPausedAt: Date.now() })
+        const guardedIds = new Set(diskGuardTasks.map(item => item.id))
+        const activeDownloads = downloadList.filter(item => item.metadata.subscriptionTaskId && guardedIds.has(item.metadata.subscriptionTaskId))
+        if (activeDownloads.length) await pauseDownloadTasks(activeDownloads)
+        for (const item of diskGuardTasks) {
+          await updateSubscriptionTask({
+            id: item.id,
+            status: 'disk_paused',
+            pauseOrigin: 'disk',
+            failureReason: lockReason,
+            speed: '',
+          })
+        }
+        await refreshSubscriptionState()
+        return
+      }
+    }
     const activeDownloadTaskIds = new Set(downloadList
       .filter(item => !item.isComplate)
       .map(item => item.metadata.subscriptionTaskId)
       .filter(Boolean))
     const pending = subscriptionState.tasks.filter(task => task.status == 'pending' && !activeDownloadTaskIds.has(task.id))
     for (const task of pending) {
-      const disk = await getSubscriptionDiskInfo().catch(() => null)
-      if (!disk) return
-      if (disk.overlapsCd2Root) {
-        await saveSubscriptionConfig({ diskLocked: true, diskPausedAt: Date.now() })
-        const remaining = subscriptionState.tasks.filter(item => item.status == 'pending')
-        const remainingIds = new Set(remaining.map(item => item.id))
-        const queuedDownloads = downloadList.filter(item => item.metadata.subscriptionTaskId && remainingIds.has(item.metadata.subscriptionTaskId))
-        if (queuedDownloads.length) await pauseDownloadTasks(queuedDownloads)
-        for (const item of remaining) {
-          await updateSubscriptionTask({
-            id: item.id,
-            status: 'disk_paused',
-            pauseOrigin: 'disk',
-            failureReason: '下载目录（或订阅临时目录）与 CloudDrive2 音乐库重叠，请修改后手动恢复',
-          })
-        }
-        await refreshSubscriptionState()
-        return
-      }
-      if (disk.freeBytes < subscriptionState.config.diskThresholdBytes) {
-        await saveSubscriptionConfig({ diskLocked: true, diskPausedAt: Date.now() })
-        const remaining = subscriptionState.tasks.filter(item => item.status == 'pending')
-        const remainingIds = new Set(remaining.map(item => item.id))
-        const queuedDownloads = downloadList.filter(item => item.metadata.subscriptionTaskId && remainingIds.has(item.metadata.subscriptionTaskId))
-        if (queuedDownloads.length) await pauseDownloadTasks(queuedDownloads)
-        for (const item of remaining) {
-          await updateSubscriptionTask({
-            id: item.id,
-            status: 'disk_paused',
-            pauseOrigin: 'disk',
-            failureReason: '本地下载磁盘剩余空间低于保护阈值',
-          })
-        }
-        await refreshSubscriptionState()
-        return
-      }
       const created = await createDownloadTasks([toRaw(task.musicInfo)], 'flac24bit', undefined, task.id)
       if (created.length) {
         await updateSubscriptionTask({
@@ -533,6 +525,7 @@ export const resumeTask = async(task: LX.Subscription.Task) => {
 
 let schedulerTimer: ReturnType<typeof setInterval> | null = null
 let maintenanceTimer: ReturnType<typeof setInterval> | null = null
+let serviceGeneration = 0
 let schedulerRunning = false
 let structureValidationRunning = false
 let backupRunning = false
@@ -579,9 +572,7 @@ const runDueSubscriptionBackup = async() => {
   if (backupRunning) return
   const config = subscriptionState.config ?? await getSubscriptionConfig()
   const interval = config.backupIntervalMinutes
-  // backupLastAt 一直是空，调度器每 60 秒就会重试一次；配置没填全时必然失败，
-  // 只会刷错误日志并反复发起注定失败的 gRPC 连接，所以这里直接跳过
-  if (!config.syncToCd2 || interval == null || !isCd2Configured(config)) return
+  if (interval == null) return
   if (config.backupLastAt != null && Date.now() - config.backupLastAt < interval * 60_000) return
   // eslint-disable-next-line require-atomic-updates
   backupRunning = true
@@ -627,8 +618,12 @@ const reconcileSubscriptionDownloads = async(canResume = !subscriptionState.conf
 export const initSubscriptionService = async() => {
   // 与“启用下载功能”一致：未开启时整个订阅功能保持关闭，不启动任何调度与自动同步
   if (!appSetting['subscription.enable']) return
+  const generation = ++serviceGeneration
+  const isCurrent = () => generation == serviceGeneration && appSetting['subscription.enable']
   await getDownloadList()
+  if (!isCurrent()) return
   await refreshSubscriptionState()
+  if (!isCurrent()) return
   if (['collecting', 'running'].includes(subscriptionState.calibrationRun?.status ?? '')) {
     void resumeSubscriptionCalibrationRun().catch(err => {
       console.error('Subscription calibration resume failed:', err)
@@ -637,6 +632,7 @@ export const initSubscriptionService = async() => {
   const canResumeSubscriptionDownloads = !subscriptionState.config?.syncToCd2 ||
     (subscriptionState.config.calibrationCompletedAt != null && !isCalibrationActive())
   await reconcileSubscriptionDownloads(canResumeSubscriptionDownloads)
+  if (!isCurrent()) return
   const resumableDownloads = downloadList.filter(item => {
     if (!item.metadata.subscriptionTaskId || item.isComplate || !canResumeSubscriptionDownloads) return false
     const task = subscriptionState.tasks.find(task => task.id == item.metadata.subscriptionTaskId)
@@ -649,11 +645,17 @@ export const initSubscriptionService = async() => {
       void resumeSubscriptionTaskPostProcess(task)
     }
   }
+  if (!isCurrent()) return
   await processSubscriptionQueue()
+  if (!isCurrent()) return
   await processSubscriptionMaintenance()
+  if (!isCurrent()) return
   await runDueSubscriptions()
+  if (!isCurrent()) return
   await runDueStructureValidation()
+  if (!isCurrent()) return
   await runDueSubscriptionBackup()
+  if (!isCurrent()) return
   schedulerTimer ??= setInterval(() => {
     void runDueSubscriptions()
     void runDueStructureValidation()
@@ -668,6 +670,7 @@ export const initSubscriptionService = async() => {
 
 /** 关闭订阅功能时停止调度与维护循环；进行中的下载不会被强制中断，与原版下载开关的行为一致 */
 export const stopSubscriptionService = () => {
+  serviceGeneration++
   if (schedulerTimer) {
     clearInterval(schedulerTimer)
     schedulerTimer = null
