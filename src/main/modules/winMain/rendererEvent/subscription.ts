@@ -78,7 +78,7 @@ export default () => {
     const downloadPath = getLocalDownloadDir()
     const cd2RootPath = next.cd2RootPath.trim() ? path.resolve(next.cd2RootPath) : ''
     if (cd2RootPath && pathsOverlap(downloadPath, cd2RootPath)) {
-      throw new Error('LX Music 下载目录不能位于 CD2 音乐库内或包含 CD2 音乐库，请先修改原版下载目录')
+      throw new Error('LX Music 下载目录不能位于 CloudDrive2 音乐库内或包含 CloudDrive2 音乐库，请先修改原版下载目录')
     }
     return global.lx.worker.dbService.updateSubscriptionConfig(params)
   })
@@ -165,7 +165,7 @@ export default () => {
   })
   mainHandle<string, LX.Subscription.Cd2UploadStatus>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_cd2_upload_status, async({ params: taskId }) => {
     const task = (await global.lx.worker.dbService.getSubscriptionTasks()).find(item => item.id == taskId)
-    if (!task?.localPath || !task.cloudPath) throw new Error('上传任务缺少本地或 CD2 目标路径')
+    if (!task?.localPath || !task.cloudPath) throw new Error('上传任务缺少本地或 CloudDrive2 目标路径')
     return getSubscriptionCd2UploadStatus({
       config: await global.lx.worker.dbService.getSubscriptionConfig(),
       localPath: task.localPath,
@@ -182,7 +182,7 @@ export default () => {
   }, LX.Subscription.ManualSyncResult>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_cd2_manual_sync, async({ params }) => {
     const config = await global.lx.worker.dbService.getSubscriptionConfig()
     if (!config.cd2RootPath.trim() || !config.cd2GrpcUrl.trim() || !config.cd2ApiToken.trim()) {
-      throw new Error('请先在「设置 → 订阅设置」中配置 CD2 音乐库与连接信息')
+      throw new Error('请先在「设置 → 订阅设置」中配置 CloudDrive2 音乐库与连接信息')
     }
     // 去重：同一首歌已在云端且音质不低于本地下载音质时跳过上传
     const entry = await global.lx.worker.dbService.getSubscriptionLibraryEntry(params.musicKey)
@@ -191,7 +191,7 @@ export default () => {
     }
     const copied = await copySubscriptionFileToCd2({ config, localPath: params.localPath, currentCloudPath: null, retryCloudPath: null })
     if (!params.deleteLocal) return { confirmed: true, skipped: false, cleaned: false }
-    // 需要删除本地文件：必须等到 CD2 明确确认上传成功，否则保留本地
+    // 需要删除本地文件：必须等到 CloudDrive2 明确确认上传成功，否则保留本地
     let status = await getSubscriptionCd2UploadStatus({ config, localPath: params.localPath, cloudPath: copied.cloudPath })
     const deadline = Date.now() + 5 * 60_000
     while (status.state == 'unconfirmed' && Date.now() < deadline) {
@@ -204,7 +204,7 @@ export default () => {
   })
   mainHandle<string>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_cd2_cleanup_local, async({ params: taskId }) => {
     const task = (await global.lx.worker.dbService.getSubscriptionTasks()).find(item => item.id == taskId)
-    if (!task?.localPath || !task.cloudPath) throw new Error('清理任务缺少本地或 CD2 目标路径')
+    if (!task?.localPath || !task.cloudPath) throw new Error('清理任务缺少本地或 CloudDrive2 目标路径')
     await cleanupSubscriptionLocalFile({
       config: await global.lx.worker.dbService.getSubscriptionConfig(),
       localPath: task.localPath,
@@ -266,7 +266,7 @@ export default () => {
     return global.lx.worker.dbService.getSubscriptionStructureValidationRecords()
   })
   mainHandle<LX.Subscription.BackupResult>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_backup_create, async() => {
-    // 备份保存在本机软件数据目录，不写入 CD2 挂载目录
+    // 备份保存在本机软件数据目录，不写入 CloudDrive2 挂载目录
     const backupDir = path.join(global.lxDataPath, 'subscription-backups')
     await fs.promises.mkdir(backupDir, { recursive: true })
     const timestamp = new Date().toISOString().replace(/[-:.]/g, '')

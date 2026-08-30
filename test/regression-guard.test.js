@@ -53,8 +53,8 @@ const buildLegacyModule = () => {
   source = replaceBlock(
     source,
     '    if (!candidates.length) {',
-    "          : '尚未关联到对应的 CD2 上传任务，云端文件也尚未就绪，继续等待确认',\n      }\n    }",
-    "    if (!candidates.length) return { state: 'unconfirmed', progress: 0, message: '尚未关联到对应的 CD2 上传任务' }",
+    "          : '尚未关联到对应的 CloudDrive2 上传任务，云端文件也尚未就绪，继续等待确认',\n      }\n    }",
+    "    if (!candidates.length) return { state: 'unconfirmed', progress: 0, message: '尚未关联到对应的 CloudDrive2 上传任务' }",
     '云端兜底',
   )
 
@@ -101,7 +101,7 @@ test('旧顺序确实会把 size=0 的预处理任务误判为「未关联」', 
   c.server.addUpload({ destPath: c.destPath, size: 0, transferedBytes: 0, statusEnum: UploadStatus.Preprocessing })
 
   const result = await c.status()
-  assert.equal(result.state, 'unconfirmed', '旧代码在这里就是关联不上——正是界面显示「尚未关联到对应的 CD2 上传任务」的来源')
+  assert.equal(result.state, 'unconfirmed', '旧代码在这里就是关联不上——正是界面显示「尚未关联到对应的 CloudDrive2 上传任务」的来源')
 })
 
 test('旧版本在传输任务被清出列表后拿不到成功结论（会被上层计时器判成 failed）', async(t) => {

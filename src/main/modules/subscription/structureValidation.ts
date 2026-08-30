@@ -21,7 +21,7 @@ export const scanSubscriptionStructure = async(
 ): Promise<string[]> => {
   await checkSubscriptionCd2Health(config)
   const rootPath = path.resolve(input.rootPath.trim() || config.cd2RootPath)
-  if (!isWithin(config.cd2RootPath, rootPath)) throw new Error('目录校验范围必须位于 CD2 音乐库根目录内')
+  if (!isWithin(config.cd2RootPath, rootPath)) throw new Error('目录校验范围必须位于 CloudDrive2 音乐库根目录内')
   const rootStat = await fs.promises.stat(rootPath).catch(() => null)
   if (!rootStat?.isDirectory()) throw new Error('目录校验根目录不存在或不是目录')
 

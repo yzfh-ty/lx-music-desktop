@@ -102,7 +102,7 @@ export const refreshSubscriptionState = async() => {
   subscriptionState.history = history
 }
 
-/** CD2 三项配置是否都填了。没填全时任何 gRPC 调用都必然失败，不必发起 */
+/** CloudDrive2 三项配置是否都填了。没填全时任何 gRPC 调用都必然失败，不必发起 */
 const isCd2Configured = (config: LX.Subscription.Config) =>
   !!config.cd2RootPath.trim() && !!config.cd2GrpcUrl.trim() && !!config.cd2ApiToken.trim()
 
@@ -271,7 +271,7 @@ export const retryTasks = async(ids: string[]) => {
 
 export const uploadLocalCompletedTask = async(task: LX.Subscription.Task) => {
   const config = subscriptionState.config ?? await getSubscriptionConfig()
-  if (!config.syncToCd2) throw new Error('请先开启“下载完成后同步到 CD2”')
+  if (!config.syncToCd2) throw new Error('请先开启“下载完成后同步到 CloudDrive2”')
   if (task.status != 'local_completed' || !task.localPath) throw new Error('该任务不是可手动上传的仅本地成品')
   await updateSubscriptionTask({ id: task.id, status: 'tagging', failureReason: null })
   await resumeSubscriptionTaskPostProcess({ ...task, status: 'tagging' })
@@ -325,7 +325,7 @@ export const processSubscriptionQueue = async() => {
             id: item.id,
             status: 'disk_paused',
             pauseOrigin: 'disk',
-            failureReason: '下载目录（或订阅临时目录）与 CD2 音乐库重叠，请修改后手动恢复',
+            failureReason: '下载目录（或订阅临时目录）与 CloudDrive2 音乐库重叠，请修改后手动恢复',
           })
         }
         await refreshSubscriptionState()
@@ -364,7 +364,7 @@ export const processSubscriptionQueue = async() => {
   }
 }
 
-// CD2 复制完成后，允许传输任务在这段时间内还没被关联上；超过后转入「待确认」并持续复查，
+// CloudDrive2 复制完成后，允许传输任务在这段时间内还没被关联上；超过后转入「待确认」并持续复查，
 // 但绝不标记为失败——本地成品仍在，重新下载没有意义，此时不清理、不倒计时。
 const uploadConfirmGraceTime = 10 * 60_000
 const cleanupDelay = 20 * 60_000
@@ -373,7 +373,7 @@ let maintenanceRunning = false
 const uploadPollingStatuses: LX.Subscription.TaskStatus[] = ['uploading', 'upload_unconfirmed']
 
 /**
- * 复查单个上传任务的 CD2 状态，返回是否发生了状态变化。
+ * 复查单个上传任务的 CloudDrive2 状态，返回是否发生了状态变化。
  * 所有无法取得明确结论的情况（关联不到传输任务、gRPC 不可用、配置异常）都停在
  * `upload_unconfirmed`，不会退回下载失败，也不会启动 20 分钟延迟清理。
  */
@@ -400,7 +400,7 @@ const syncUploadTaskStatus = async(task: LX.Subscription.Task): Promise<boolean>
       await updateSubscriptionTask({
         id: task.id,
         status: 'failed',
-        failureReason: `CD2 上传失败：${status.message}`,
+        failureReason: `CloudDrive2 上传失败：${status.message}`,
         progress: status.progress,
         speed: '',
       })
@@ -447,7 +447,7 @@ const syncUploadTaskStatus = async(task: LX.Subscription.Task): Promise<boolean>
 export const recheckSubscriptionUpload = async(task: LX.Subscription.Task) => {
   const current = (await getSubscriptionTasks()).find(item => item.id == task.id)
   if (!current) throw new Error('任务不存在')
-  if (!uploadPollingStatuses.includes(current.status)) throw new Error('该任务当前不处于等待 CD2 确认的阶段')
+  if (!uploadPollingStatuses.includes(current.status)) throw new Error('该任务当前不处于等待 CloudDrive2 确认的阶段')
   await syncUploadTaskStatus(current)
   await refreshSubscriptionState()
   return subscriptionState.tasks.find(item => item.id == task.id) ?? current

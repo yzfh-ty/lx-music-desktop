@@ -5,7 +5,7 @@
  * 跑的是编译自 src/renderer/store/subscription/index.ts 的真实代码，
  * IPC 层换成内存替身（行为照抄真实 DB 层，包括 history 的写入条件）。
  *
- * 核心命题：CD2 那边无法给出明确结论时，任务只能停在 upload_unconfirmed，
+ * 核心命题：CloudDrive2 那边无法给出明确结论时，任务只能停在 upload_unconfirmed，
  * 绝不能变成 failed —— 本地成品还在，重新下载毫无意义。
  *
  *   node --test test/task-state-machine.test.js
@@ -39,7 +39,7 @@ const beforeEach = () => { ipc.__reset() }
 const taskOf = id => ipc.__state.tasks.get(id)
 const historyOf = id => ipc.__state.history.filter(h => h.taskId == id)
 
-const UNCONFIRMED = { state: 'unconfirmed', progress: 0, message: '尚未关联到对应的 CD2 上传任务，云端文件也尚未就绪，继续等待确认' }
+const UNCONFIRMED = { state: 'unconfirmed', progress: 0, message: '尚未关联到对应的 CloudDrive2 上传任务，云端文件也尚未就绪，继续等待确认' }
 const SUCCESS = { state: 'success', progress: 100, message: 'Finish', verifiedByCloudFile: true }
 
 // ------------------------------------------------------- 关联不上 ≠ 下载失败
@@ -86,7 +86,7 @@ test('待确认期间原因变化时更新原因，但状态不变', async() => 
   const task = ipc.__addTask({ status: 'uploading', uploadStartedAt: Date.now() - GRACE - 1000 })
   ipc.__scriptCd2Status(task.id, [
     UNCONFIRMED,
-    { state: 'unconfirmed', progress: 0, message: '关联到多个仍在运行的 CD2 上传任务，暂不确认' },
+    { state: 'unconfirmed', progress: 0, message: '关联到多个仍在运行的 CloudDrive2 上传任务，暂不确认' },
   ])
 
   await store.processSubscriptionMaintenance()
@@ -121,7 +121,7 @@ test('查询报错反复出现同一条原因时，也不刷历史', async() => 
 
 // ------------------------------------------------------------------ 能恢复
 
-test('待确认的任务在 CD2 恢复后能自动回到 uploading', async() => {
+test('待确认的任务在 CloudDrive2 恢复后能自动回到 uploading', async() => {
   beforeEach()
   const task = ipc.__addTask({ status: 'upload_unconfirmed', failureReason: '尚未关联' })
   ipc.__scriptCd2Status(task.id, { state: 'running', progress: 42, message: 'Transfer' })
@@ -134,7 +134,7 @@ test('待确认的任务在 CD2 恢复后能自动回到 uploading', async() => 
   assert.equal(after.failureReason, null, '恢复后要清掉原因')
 })
 
-test('待确认的任务在 CD2 确认成功后能自动完成确认', async() => {
+test('待确认的任务在 CloudDrive2 确认成功后能自动完成确认', async() => {
   beforeEach()
   const task = ipc.__addTask({ status: 'upload_unconfirmed', failureReason: '尚未关联' })
   ipc.__scriptCd2Status(task.id, SUCCESS)
@@ -150,7 +150,7 @@ test('待确认的任务在 CD2 确认成功后能自动完成确认', async() =
 
 // -------------------------------------------------------------- 真失败仍是失败
 
-test('CD2 明确报告传输失败时，仍然标记为 failed', async() => {
+test('CloudDrive2 明确报告传输失败时，仍然标记为 failed', async() => {
   beforeEach()
   const task = ipc.__addTask({ status: 'uploading' })
   ipc.__scriptCd2Status(task.id, { state: 'failed', progress: 12, message: 'disk quota exceeded' })
@@ -159,7 +159,7 @@ test('CD2 明确报告传输失败时，仍然标记为 failed', async() => {
 
   const after = taskOf(task.id)
   assert.equal(after.status, 'failed')
-  assert.match(after.failureReason, /CD2 上传失败/)
+  assert.match(after.failureReason, /CloudDrive2 上传失败/)
   assert.match(after.failureReason, /disk quota/)
 })
 
@@ -220,7 +220,7 @@ test('手动重新检查：仍无结论时返回原因', async() => {
   assert.equal(result.status, 'upload_unconfirmed')
 })
 
-test('手动重新检查：CD2 已经好了就立刻推进', async() => {
+test('手动重新检查：CloudDrive2 已经好了就立刻推进', async() => {
   beforeEach()
   const task = ipc.__addTask({ status: 'upload_unconfirmed', failureReason: '尚未关联' })
   ipc.__scriptCd2Status(task.id, SUCCESS)
@@ -234,7 +234,7 @@ test('手动重新检查：不在上传确认阶段的任务会被拒绝', async
   beforeEach()
   const task = ipc.__addTask({ status: 'failed' })
 
-  await assert.rejects(store.recheckSubscriptionUpload(task), /不处于等待 CD2 确认的阶段/)
+  await assert.rejects(store.recheckSubscriptionUpload(task), /不处于等待 CloudDrive2 确认的阶段/)
 })
 
 // ------------------------------------------------------------ 延迟清理与旧版本
@@ -267,7 +267,7 @@ test('清理被推迟时保持 cleanup_wait，不丢本地文件也不判失败'
   beforeEach()
   const task = ipc.__addTask({ status: 'cleanup_wait', cleanupAt: Date.now() - 1000 })
   ipc.__scriptCd2Status(task.id, SUCCESS)
-  ipc.__state.cleanupBehaviour.throws = '延迟清理已推迟：CD2 目标文件不存在'
+  ipc.__state.cleanupBehaviour.throws = '延迟清理已推迟：CloudDrive2 目标文件不存在'
 
   await store.processSubscriptionMaintenance()
 
@@ -303,9 +303,9 @@ test('旧版本清理成功后进入延迟清理并清空旧路径', async() => 
   assert.equal(after.oldCloudPath, null)
 })
 
-// ------------------------------------------------------------ CD2 开关关闭时
+// ------------------------------------------------------------ CloudDrive2 开关关闭时
 
-test('关闭 CD2 同步后，待确认任务降级为仅本地完成而不是卡死', async() => {
+test('关闭 CloudDrive2 同步后，待确认任务降级为仅本地完成而不是卡死', async() => {
   beforeEach()
   const task = ipc.__addTask({ status: 'uploading', uploadStartedAt: Date.now() - GRACE - 1000 })
   ipc.__scriptCd2Status(task.id, UNCONFIRMED)
@@ -318,7 +318,7 @@ test('关闭 CD2 同步后，待确认任务降级为仅本地完成而不是卡
 
 // ------------------------------------------------------------------ 多任务
 
-test('多个上传任务互不影响，各自按自己的 CD2 结论走', async() => {
+test('多个上传任务互不影响，各自按自己的 CloudDrive2 结论走', async() => {
   beforeEach()
   const ok = ipc.__addTask({ id: 'ok', status: 'uploading' })
   const pending = ipc.__addTask({ id: 'pending', status: 'uploading', uploadStartedAt: Date.now() - GRACE - 1000 })

@@ -875,7 +875,7 @@ export const updateSubscriptionTask = (input: LX.Subscription.TaskUpdate): LX.Su
         INSERT INTO subscription_history (task_id, music_key, status, message, snapshot, created_at)
         VALUES (?, ?, ?, ?, ?, ?)
       `).run(next.id, next.musicKey, next.status,
-        next.status == 'local_completed' ? 'CD2 同步已关闭，任务仅保留本地成品' : next.failureReason,
+        next.status == 'local_completed' ? 'CloudDrive2 同步已关闭，任务仅保留本地成品' : next.failureReason,
         JSON.stringify(toTaskHistorySnapshot(next)), next.updatedAt)
     }
   })()
@@ -944,7 +944,7 @@ export const confirmSubscriptionUpload = (input: {
       INSERT INTO subscription_history (task_id, music_key, status, message, snapshot, created_at)
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(input.taskId, row.music_key, nextStatus,
-      nextStatus == 'old_version_cleanup' ? 'CD2 已确认新版本上传成功，等待清理旧扩展名版本' : 'CD2 已确认上传成功',
+      nextStatus == 'old_version_cleanup' ? 'CloudDrive2 已确认新版本上传成功，等待清理旧扩展名版本' : 'CloudDrive2 已确认上传成功',
       JSON.stringify(toTaskHistorySnapshot(confirmedTask, config.stopQuality)), input.confirmedAt)
   })()
   return getSubscriptionTasks().find(task => task.id == input.taskId)!

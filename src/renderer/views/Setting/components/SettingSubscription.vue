@@ -261,7 +261,7 @@ const handleChangeTempPath = () => {
     properties: ['openDirectory'],
   }).then(result => {
     if (result.canceled) return
-    // 临时目录不能位于 CD2 音乐库内，否则订阅下载会直接写进挂载目录
+    // 临时目录不能位于 CloudDrive2 音乐库内，否则订阅下载会直接写进挂载目录
     const chosen = result.filePaths[0].replace(/\/+$/, '')
     const cd2Root = state.config?.cd2RootPath.trim().replace(/\/+$/, '').toLowerCase()
     if (cd2Root) {

@@ -94,7 +94,7 @@ mustRefuse('关联不到传输任务、云端也没有文件时拒绝清理', {
   arrange: () => {},
 }, /推迟/)
 
-mustRefuse('云端条目还是 CD2 本地写缓存（isLocal=true）时拒绝清理', {
+mustRefuse('云端条目还是 CloudDrive2 本地写缓存（isLocal=true）时拒绝清理', {
   arrange: c => { c.server.putCloudFile(c.destPath, { size: FILE_SIZE, isCloudFile: true, isLocal: true }) },
 }, /推迟/)
 
@@ -117,11 +117,11 @@ mustRefuse('传输任务仍在进行时拒绝清理', {
   },
 }, /推迟/)
 
-mustRefuse('CD2 gRPC 不可用时拒绝清理', {
+mustRefuse('CloudDrive2 gRPC 不可用时拒绝清理', {
   arrange: async c => { await c.server.stop() },
 })
 
-mustRefuse('CD2 未就绪时拒绝清理', {
+mustRefuse('CloudDrive2 未就绪时拒绝清理', {
   arrange: c => { c.server.systemInfo.SystemReady = false },
 })
 

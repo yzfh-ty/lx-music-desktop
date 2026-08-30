@@ -3,7 +3,7 @@
  * getSubscriptionCd2UploadStatus / cleanupSubscriptionLocalFile 的行为测试。
  *
  * 跑的是编译自 src/main/modules/subscription/cd2.ts 的真实代码，
- * 对端是一个用同一份 clouddrive.proto 起的假 CD2 服务，走真实 gRPC。
+ * 对端是一个用同一份 clouddrive.proto 起的假 CloudDrive2 服务，走真实 gRPC。
  *
  *   node --test test/cd2-upload-status.test.js
  */
@@ -36,7 +36,7 @@ const setup = async(opts = {}) => {
   }]
   const localPath = ws.writeFile(ws.download, FILE_NAME, FILE_SIZE)
   const cloudPath = path.join(ws.mount, FILE_NAME)
-  // 复制到挂载点：CD2 场景下文件写进挂载目录后立刻可见，上传是异步的
+  // 复制到挂载点：CloudDrive2 场景下文件写进挂载目录后立刻可见，上传是异步的
   if (opts.copiedToMount !== false) fs.copyFileSync(localPath, cloudPath)
   const config = makeConfig({ cd2RootPath: ws.mount, cd2GrpcUrl: server.url })
   const destPath = `${SOURCE_DIR}/${FILE_NAME}`
@@ -55,7 +55,7 @@ const setup = async(opts = {}) => {
 
 // ---------------------------------------------------------------- 关联与进度
 
-test('destPath 精确匹配：CD2 预处理阶段报告 size=0 也要能关联上（回归：旧实现会误判为未关联）', async(t) => {
+test('destPath 精确匹配：CloudDrive2 预处理阶段报告 size=0 也要能关联上（回归：旧实现会误判为未关联）', async(t) => {
   const c = await setup()
   t.after(() => c.teardown())
   c.server.addUpload({ destPath: c.destPath, size: 0, transferedBytes: 0, statusEnum: UploadStatus.Preprocessing })
@@ -87,7 +87,7 @@ test('size 报告为 0 时用本地文件大小做分母，进度不会恒为 0'
 test('destPath 对不上但同名同大小且唯一时，退回启发式匹配', async(t) => {
   const c = await setup()
   t.after(() => c.teardown())
-  // 模拟 CD2 用了另一种路径拼法
+  // 模拟 CloudDrive2 用了另一种路径拼法
   c.server.addUpload({ destPath: `/OtherRoot/${FILE_NAME}`, size: FILE_SIZE, transferedBytes: FILE_SIZE / 10, statusEnum: UploadStatus.Transfer })
 
   const result = await c.status()
@@ -117,10 +117,10 @@ test('传输任务 Finish 且云端文件校验通过 → success', async(t) => 
   assert.equal(result.progress, 100)
 })
 
-test('传输任务已被 CD2 移出列表，但云端文件存在且大小一致 → success（核心修复）', async(t) => {
+test('传输任务已被 CloudDrive2 移出列表，但云端文件存在且大小一致 → success（核心修复）', async(t) => {
   const c = await setup()
   t.after(() => c.teardown())
-  // 上传列表为空，模拟 CD2 传输完成后清理了任务
+  // 上传列表为空，模拟 CloudDrive2 传输完成后清理了任务
   c.server.putCloudFile(c.destPath, { size: FILE_SIZE, isCloudFile: true, isLocal: false })
 
   const result = await c.status()
@@ -140,13 +140,13 @@ test('Skipped（秒传/目标已存在）且云端校验通过 → success 而�
 
 // ------------------------------------------------- 防误判（数据安全关键路径）
 
-test('云端条目仍是 CD2 本地写缓存（isLocal=true）时绝不判成功', async(t) => {
+test('云端条目仍是 CloudDrive2 本地写缓存（isLocal=true）时绝不判成功', async(t) => {
   const c = await setup()
   t.after(() => c.teardown())
   c.server.putCloudFile(c.destPath, { size: FILE_SIZE, isCloudFile: true, isLocal: true })
 
   const result = await c.status()
-  assert.equal(result.state, 'unconfirmed', 'CD2 写入挂载点后文件立刻可见，只看存在性会误删本地成品')
+  assert.equal(result.state, 'unconfirmed', 'CloudDrive2 写入挂载点后文件立刻可见，只看存在性会误删本地成品')
 })
 
 test('云端条目 isCloudFile=false 时绝不判成功', async(t) => {
@@ -186,7 +186,7 @@ test('传输任务 Finish 但云端与挂载点都查不到文件 → unconfirme
   assert.equal(result.state, 'unconfirmed')
 })
 
-test('Finish 时云端说大小不对，不能被挂载点 stat 推翻（挂载点看到的是 CD2 本地写缓存）', async(t) => {
+test('Finish 时云端说大小不对，不能被挂载点 stat 推翻（挂载点看到的是 CloudDrive2 本地写缓存）', async(t) => {
   const c = await setup()
   t.after(() => c.teardown())
   c.server.addUpload({ destPath: c.destPath, size: FILE_SIZE, transferedBytes: FILE_SIZE, statusEnum: UploadStatus.Finish })
@@ -280,7 +280,7 @@ test('Token 缺少列目录权限时，unconfirmed 的原因要说清楚', async
 
 // ------------------------------------------------- 连接前置检查（不应误报失败）
 
-test('CD2 未登录时抛错，由上层归入"待确认"而不是下载失败', async(t) => {
+test('CloudDrive2 未登录时抛错，由上层归入"待确认"而不是下载失败', async(t) => {
   const c = await setup()
   t.after(() => c.teardown())
   c.server.systemInfo.IsLogin = false

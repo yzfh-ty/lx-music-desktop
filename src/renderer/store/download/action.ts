@@ -243,7 +243,7 @@ const markSubscriptionDownloadSkipped = async(downloadInfo: LX.Download.ListItem
   }
 }
 
-// 手动下载的 CD2 同步：上传到 CD2 音乐库根目录，按设置决定是否清理本地文件；
+// 手动下载的 CloudDrive2 同步：上传到 CloudDrive2 音乐库根目录，按设置决定是否清理本地文件；
 // 失败只反映在下载列表状态文本上，本地文件始终保留
 const syncManualDownloadCd2 = async(downloadInfo: LX.Download.ListItem, deleteLocal: boolean) => {
   try {
@@ -398,7 +398,7 @@ export const resumeSubscriptionPostProcess = async(downloadInfo: LX.Download.Lis
       return
     }
     if (!ignoreUnsupportedMetadata && !['mp3', 'flac'].includes(downloadInfo.metadata.ext)) {
-      throw new Error(`当前 ${downloadInfo.metadata.ext.toUpperCase()} 格式不支持内嵌订阅所需的完整元数据，未上传到 CD2`)
+      throw new Error(`当前 ${downloadInfo.metadata.ext.toUpperCase()} 格式不支持内嵌订阅所需的完整元数据，未上传到 CloudDrive2`)
     }
     await updateSubscriptionTask({ id: taskId, status: 'tagging', fileVerifiedQuality: inspection.quality })
     if (!ignoreUnsupportedMetadata) await saveMeta(downloadInfo)
@@ -495,7 +495,7 @@ const handleStartTask = async(downloadInfo: LX.Download.ListItem) => {
         void window.lx.worker.download.removeTask(downloadInfo.id)
         runingTask.delete(downloadInfo.id)
         setStatus(downloadInfo, DOWNLOAD_STATUS.COMPLETED)
-        // 手动下载的 CD2 同步：上传并保留本地，或上传后清理本地（在下载设置中配置）
+        // 手动下载的 CloudDrive2 同步：上传并保留本地，或上传后清理本地（在下载设置中配置）
         if (appSetting['download.cd2SyncMode'] != 'off') {
           void syncManualDownloadCd2(downloadInfo, appSetting['download.cd2SyncMode'] == 'clean')
         }

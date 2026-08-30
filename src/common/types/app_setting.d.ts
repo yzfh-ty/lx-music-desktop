@@ -702,7 +702,7 @@ declare global {
       'subscription.tempPath': string
 
       /**
-       * 手动下载完成后同步到 CD2 的模式
+       * 手动下载完成后同步到 CloudDrive2 的模式
        */
       'download.cd2SyncMode': 'off' | 'keep' | 'clean'
     }

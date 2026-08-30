@@ -211,9 +211,9 @@ declare namespace LX {
 
     interface Cd2UploadStatus {
       /**
-       * running: CD2 传输任务仍在进行
-       * success: CD2 已明确确认上传成功
-       * failed: CD2 明确报告传输任务失败
+       * running: CloudDrive2 传输任务仍在进行
+       * success: CloudDrive2 已明确确认上传成功
+       * failed: CloudDrive2 明确报告传输任务失败
        * unconfirmed: 暂时无法取得明确结论（未关联到传输任务、多任务冲突、gRPC 不可用等），
        *              既不能当作成功启动延迟清理，也不能当作失败要求重新下载
        */
