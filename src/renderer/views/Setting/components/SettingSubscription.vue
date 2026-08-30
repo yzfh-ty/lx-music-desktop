@@ -28,6 +28,7 @@ dd.gap-top(:aria-label="$t('setting__subscription_config')")
       | {{ $t('setting__subscription_temp_path') }}
       div
         span.auto-hidden.hover(:class="$style.tempPath" :title="appSetting['subscription.tempPath']") {{ appSetting['subscription.tempPath'] || $t('setting__subscription_temp_path_empty') }}
+    .p.small.tip {{ $t('setting__subscription_temp_path_tip') }}
     .p
       base-btn.btn(min @click="handleChangeTempPath") {{ $t('setting__subscription_temp_path_change') }}
     .p.gap-top
