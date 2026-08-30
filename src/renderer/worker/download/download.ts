@@ -8,7 +8,7 @@ import { createDownloadInfo } from './utils'
 //   assertApiSupport,
 //   getExt,
 // } from '..'
-import { checkAndCreateDir, checkPath, getFileStats, joinPath, moveFile, removeFile } from '@common/utils/nodejs'
+import { checkAndCreateDir, checkPath, getFileStats, removeFile } from '@common/utils/nodejs'
 import { DOWNLOAD_STATUS } from '@common/constants'
 // import { download as eventDownloadNames } from '@renderer/event/names'
 
@@ -72,8 +72,6 @@ const createTask = async(downloadInfo: LX.Download.ListItem, savePath: string, s
   if (!tasks.has(downloadInfo.id)) return
 
   if (downloadInfo.downloaded == 0) {
-    // 全新任务不续传遗留的 .part 临时文件，避免混入旧内容
-    await removeFile(joinPath(savePath, downloadInfo.metadata.fileName + '.part')).catch(() => {})
     if (skipExistFile) {
       const stats = await getFileStats(downloadInfo.metadata.filePath)
       if (stats && stats.size > 100) {
@@ -103,22 +101,18 @@ const createTask = async(downloadInfo: LX.Download.ListItem, savePath: string, s
   const downloadOptions: DownloadOptions = {
     url: downloadInfo.metadata.url ?? '',
     path: savePath,
-    fileName: downloadInfo.metadata.fileName + '.part',
+    fileName: downloadInfo.metadata.fileName,
     method: 'get',
     proxy,
     onCompleted() {
-      // 下载完成后把 .part 临时文件改名为正式文件，改名失败按下载失败处理
-      void moveFile(joinPath(savePath, downloadInfo.metadata.fileName + '.part'), downloadInfo.metadata.filePath).then(() => {
-        downloadInfo.isComplate = true
-        downloadInfo.status = DOWNLOAD_STATUS.COMPLETED
-        sendAction(downloadInfo.id, { action: 'complete' })
-        console.log('on complate')
-      }).catch(err => {
-        sendAction(downloadInfo.id, {
-          action: 'error',
-          data: { message: `保存下载文件失败：${err.message as string}` },
-        })
-      })
+      // if (downloadInfo.progress.progress != '100.00') {
+      //   delete.get(downloadInfo.id)?
+      //   return dispatch('startTask', downloadInfo)
+      // }
+      downloadInfo.isComplate = true
+      downloadInfo.status = DOWNLOAD_STATUS.COMPLETED
+      sendAction(downloadInfo.id, { action: 'complete' })
+      console.log('on complate')
     },
     onError(err: any) {
       console.error(err)
@@ -147,7 +141,7 @@ const createTask = async(downloadInfo: LX.Download.ListItem, savePath: string, s
         return
       }
       if (err.message?.startsWith('Resume failed')) {
-        removeFile(downloadInfo.metadata.filePath + '.part').catch(err => {
+        removeFile(downloadInfo.metadata.filePath).catch(err => {
           console.log('删除不匹配的文件失败：', err.message)
           // commit('onError', { downloadInfo, errorMsg: '删除不匹配的文件失败：' + err.message })
         }).finally(() => {
@@ -273,7 +267,7 @@ export const startTask = async(downloadInfo: LX.Download.ListItem, savePath: str
     //   downloadInfo,
     //   filePath: path.join(rootState.setting.download.savePath, downloadInfo.metadata.fileName),
     // })
-    dl.updateSaveInfo(savePath, downloadInfo.metadata.fileName + '.part')
+    dl.updateSaveInfo(savePath, downloadInfo.metadata.fileName)
     if (tryNum.has(downloadInfo.id)) tryNum.set(downloadInfo.id, 0)
     try {
       await dl.start()
@@ -322,10 +316,10 @@ export const removeTask = async(id: string) => {
   }
 
   if (downloadInfo) {
-    // 没有未完成、已下载大于1k，清理 .part 临时文件
+    // 没有未完成、已下载大于1k
     if (!downloadInfo.isComplate && downloadInfo.total && downloadInfo.downloaded > 1024) {
       try {
-        await removeFile(downloadInfo.metadata.filePath + '.part')
+        await removeFile(downloadInfo.metadata.filePath)
       } catch (_) {}
     }
   }

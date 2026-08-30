@@ -257,12 +257,10 @@ const getUrl = async(downloadInfo: LX.Download.ListItem, isRefresh: boolean = fa
       allowToggleSource: appSetting['download.isUseOtherSource'],
     })
     const report = result.detail.sourceReportedQuality
-    if (!report) {
-      await markSubscriptionDownloadSkipped(downloadInfo, '音源未报告可确认的实际音质')
-      return subscriptionSkipToken
-    }
     const task = (await getSubscriptionTasks()).find(item => item.id == taskId)
-    if (task?.cloudQuality && qualityRank[report] <= qualityRank[task.cloudQuality]) {
+    // 音源报告音质仅用于下载前的快速跳过；旧版音源只返回 URL（report 为空）时照常下载，
+    // 升级与否交由下载后的本地文件复核把关
+    if (report && task?.cloudQuality && qualityRank[report] <= qualityRank[task.cloudQuality]) {
       await updateSubscriptionTask({ id: taskId, sourceReportedQuality: report })
       await markSubscriptionDownloadSkipped(downloadInfo, `音源报告音质 ${report} 未高于云端音质 ${task.cloudQuality}`)
       return subscriptionSkipToken
@@ -270,7 +268,7 @@ const getUrl = async(downloadInfo: LX.Download.ListItem, isRefresh: boolean = fa
     await updateSubscriptionTask({
       id: taskId,
       status: 'downloading',
-      sourceReportedQuality: report,
+      sourceReportedQuality: report ?? null,
       sourceUsed: appSetting['common.apiSource'],
       actualSource: result.musicInfo.source,
       actualSongId: result.musicInfo.id,
