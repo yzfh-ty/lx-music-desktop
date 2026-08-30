@@ -127,6 +127,8 @@ export default () => {
   })
   mainHandle<LX.Subscription.DiskInfo>(WIN_MAIN_RENDERER_EVENT_NAME.subscription_disk_info_get, async() => {
     const targetPath = getLocalDownloadDir()
+    // 刚设置的临时目录可能还不存在，先创建再查询，否则 statfs 会抛错导致队列停摆
+    await fs.promises.mkdir(targetPath, { recursive: true }).catch(() => {})
     const stat = await fs.promises.statfs(targetPath)
     const config = await global.lx.worker.dbService.getSubscriptionConfig()
     const cd2RootPath = config.cd2RootPath.trim() ? path.resolve(config.cd2RootPath) : ''

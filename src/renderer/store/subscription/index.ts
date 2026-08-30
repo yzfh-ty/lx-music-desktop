@@ -312,7 +312,8 @@ export const processSubscriptionQueue = async() => {
       .filter(Boolean))
     const pending = subscriptionState.tasks.filter(task => task.status == 'pending' && !activeDownloadTaskIds.has(task.id))
     for (const task of pending) {
-      const disk = await getSubscriptionDiskInfo()
+      const disk = await getSubscriptionDiskInfo().catch(() => null)
+      if (!disk) return
       if (disk.overlapsCd2Root) {
         await saveSubscriptionConfig({ diskLocked: true, diskPausedAt: Date.now() })
         const remaining = subscriptionState.tasks.filter(item => item.status == 'pending')
@@ -324,7 +325,7 @@ export const processSubscriptionQueue = async() => {
             id: item.id,
             status: 'disk_paused',
             pauseOrigin: 'disk',
-            failureReason: 'LX Music 下载目录与 CD2 音乐库重叠，请修改原版下载目录后手动恢复',
+            failureReason: '下载目录（或订阅临时目录）与 CD2 音乐库重叠，请修改后手动恢复',
           })
         }
         await refreshSubscriptionState()

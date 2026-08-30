@@ -570,6 +570,7 @@
   "setting__subscription_temp_path": "Download temp directory",
   "setting__subscription_temp_path_change": "Change directory",
   "setting__subscription_temp_path_empty": "Not set (uses the original download directory)",
+  "setting__subscription_temp_path_invalid": "The temp directory cannot be inside the CD2 music library. Please choose another folder.",
   "setting__subscription_temp_songs": "Songs in the temp directory",
   "setting__sync": "Data Sync",
   "setting__sync_client_address": "Current device address: {address}",

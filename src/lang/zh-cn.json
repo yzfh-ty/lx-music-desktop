@@ -570,6 +570,7 @@
   "setting__subscription_temp_path": "下载临时目录",
   "setting__subscription_temp_path_change": "更改目录",
   "setting__subscription_temp_path_empty": "未设置（使用原版下载目录）",
+  "setting__subscription_temp_path_invalid": "临时目录不能位于 CD2 音乐库目录内，请重新选择",
   "setting__subscription_temp_songs": "临时目录中的歌曲",
   "setting__sync": "数据同步",
   "setting__sync_client_address": "当前设备地址：{address}",
