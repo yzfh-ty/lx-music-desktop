@@ -7,6 +7,8 @@ module.exports = {
   target: 'electron-main',
   output: {
     filename: '[name].js',
+    // Main and renderer builds share dist; their lazy chunks must not overwrite each other.
+    chunkFilename: 'main.[name].js',
     library: {
       type: 'commonjs2',
     },
@@ -16,7 +18,6 @@ module.exports = {
     'font-list': 'font-list',
     'better-sqlite3': 'better-sqlite3',
     'electron-font-manager': 'electron-font-manager',
-    'music-metadata': 'music-metadata',
     bufferutil: 'bufferutil',
     'utf-8-validate': 'utf-8-validate',
     'qrc_decode.node': isDev ? path.join(__dirname, '../../build/Release/qrc_decode.node') : path.join('../build/Release/qrc_decode.node'),

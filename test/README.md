@@ -21,6 +21,7 @@ node --test test/cd2-upload-status.test.js  # 跑单个
 | `db-status-enums.test.js` | 数据库层对 `upload_unconfirmed` 的处理：重试入口、看板计数、重新入队拦截、歌单同步、云端校准保护；另覆盖手动上传去重记录的新增与升级 |
 | `i18n.test.js` | 三份语言文件的键集一致性、字典序、占位符匹配、繁体用词，以及代码引用的 key 都存在、无死键、页面无硬编码中文 |
 | `vue-typecheck.test.js` | 按 vue-loader 的方式生成 `<name>.vue.ts` 再跑 tsc，抓模板里的类型错误（例如 `v-slot` 解构参数缺类型标注） |
+| `packaged-metadata.test.js` | 使用主进程 Webpack 配置构建元数据解析入口，在仓库外且无外部依赖的目录运行产物，验证 WAV 与无扩展名音频解析，防止安装包遗漏 `music-metadata` 及其动态解析器 |
 | `regression-guard.test.js` | 变异测试：把关键逻辑改回修复前的写法，断言旧版本**确实**有 bug；同时守卫手动下载必须先完成元数据/歌词再同步、未确认时不得显示成功、数据库 Worker 并发请求，以及发布工作流保存四平台产物并在当前仓库创建 Release |
 
 ## 替身怎么搭的
