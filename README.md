@@ -73,7 +73,9 @@
 
 订阅功能默认关闭，在「设置 → 订阅设置 → 启用订阅功能」开启后，左侧导航会出现「订阅」入口。下载目录、文件名格式、并发数、封面歌词等仍使用 LX Music 原版下载设置。
 
-开发与测试：`npm test` 运行 116 项回归测试（i18n 完整性、任务状态机、CloudDrive2 上传状态、手动下载三种同步模式、清理安全、磁盘保护、备份与服务生命周期等）；`node scripts/typecheck-vue.js <file.vue>` 对订阅相关组件做真实类型检查。真实 CloudDrive2/F 盘的逐项验收结果见[测试说明](./test/README.md#真实环境验收记录)。
+开发与测试：`npm test` 运行 117 项回归测试（i18n 完整性、任务状态机、CloudDrive2 上传状态、手动下载三种同步模式、清理安全、磁盘保护、备份、服务生命周期与发布流程等）；`node scripts/typecheck-vue.js <file.vue>` 对订阅相关组件做真实类型检查。真实 CloudDrive2/F 盘的逐项验收结果见[测试说明](./test/README.md#真实环境验收记录)。
+
+发布构建：推送 `master` 后，GitHub Actions 分别生成 Windows、Windows 7、macOS、Linux 安装包，并保存为四组 Artifacts；全部平台成功后统一发布到[本仓库 Releases](https://github.com/yzfh-ty/lx-music-desktop/releases)，附带 `SHA256SUMS.txt` 校验文件。新版本发布前需同步更新 `package.json` 和 `package-lock.json` 的版本号。
 
 ### Scheme URL 支持
 

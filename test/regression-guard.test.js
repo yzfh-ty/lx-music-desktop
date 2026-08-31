@@ -161,3 +161,19 @@ test('数据库 Worker 允许订阅页面的并发 Comlink 请求', () => {
   const source = fs.readFileSync(path.join(repoRoot, 'src/main/worker/utils/index.ts'), 'utf8')
   assert.match(source, /worker\.setMaxListeners\(100\)/)
 })
+
+test('发布工作流会保存四个平台产物并统一创建当前仓库 Release', () => {
+  const workflow = fs.readFileSync(path.join(repoRoot, '.github/workflows/release.yml'), 'utf8')
+  assert.match(workflow, /permissions:\s+contents: write/)
+  assert.doesNotMatch(workflow, /npm run publish:/, '平台任务不应直接并发发布 Release')
+  assert.equal((workflow.match(/uses: actions\/upload-artifact@v7/g) ?? []).length, 4)
+  assert.match(workflow, /uses: actions\/download-artifact@v8/)
+  assert.match(workflow, /gh release create "\$tag" release-assets\/\*/)
+  assert.match(workflow, /--repo "\$GITHUB_REPOSITORY"/)
+  assert.match(workflow, /test "\$asset_count" -eq 16/)
+
+  const packer = fs.readFileSync(path.join(repoRoot, 'build-config/build-pack.js'), 'utf8')
+  assert.match(packer, /process\.env\.GITHUB_REPOSITORY/)
+  assert.match(packer, /owner: githubRepository\[0\]/)
+  assert.match(packer, /repo: githubRepository\[1\]/)
+})

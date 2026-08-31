@@ -8,6 +8,9 @@ on:
 env:
   IS_CI: 'true'
 
+permissions:
+  contents: read
+
 jobs:
   # CheckCode:
   #   name: Lint Code
@@ -65,21 +68,26 @@ jobs:
           git status --porcelain
           npm run build
 
-      - name: Release package
+      - name: Build packages
         run: |
-          npm run publish:win:7z:x64
-          npm run publish:win:7z:arm64
-          npm run publish:win:setup:arm64
-          npm run publish:win:setup:x64
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BT_TOKEN: ${{ secrets.BT_TOKEN }}
+          npm run pack:win:7z:x64
+          npm run pack:win:7z:arm64
+          npm run pack:win:setup:arm64
+          npm run pack:win:setup:x64
 
       - name: Generate file MD5
         run: |
           cd build
           Get-FileHash *.exe,*.7z -Algorithm MD5 | Format-List
 
+      - name: Upload Windows packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: lx-music-desktop-windows
+          path: |
+            build/*.exe
+            build/*.7z
+          if-no-files-found: error
 
   Windows_7:
     name: Windows_7
@@ -115,19 +123,25 @@ jobs:
           npm install electron@22
           pip.exe install setuptools
 
-      - name: Release win7 package
+      - name: Build win7 packages
         run: |
-          npm run publish:win7:setup:x64
-          npm run publish:win7:7z:x64
-          npm run publish:win7:7z:x86
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BT_TOKEN: ${{ secrets.BT_TOKEN }}
+          npm run pack:win7:setup:x64
+          npm run pack:win7:7z:x64
+          npm run pack:win7:7z:x86
 
       - name: Generate file MD5
         run: |
           cd build
           Get-FileHash *.exe,*.7z -Algorithm MD5 | Format-List
+
+      - name: Upload Windows 7 packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: lx-music-desktop-windows-7
+          path: |
+            build/*.exe
+            build/*.7z
+          if-no-files-found: error
 
   Mac:
     name: Mac
@@ -156,18 +170,22 @@ jobs:
           git status --porcelain
           npm run build
 
-      - name: Release package
+      - name: Build packages
         run: |
-          npm run publish:mac:dmg
-          npm run publish:mac:dmg:arm64
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BT_TOKEN: ${{ secrets.BT_TOKEN }}
+          npm run pack:mac:dmg
+          npm run pack:mac:dmg:arm64
 
       - name: Generate file MD5
         run: |
           cd build
           md5 *.dmg
+
+      - name: Upload macOS packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: lx-music-desktop-macos
+          path: build/*.dmg
+          if-no-files-found: error
 
   Linux:
     name: Linux
@@ -196,19 +214,69 @@ jobs:
           git status --porcelain
           npm run build
 
-      - name: Release package
+      - name: Build packages
         run: |
-          npm run publish:linux:deb:amd64
-          npm run publish:linux:deb:arm64
-          npm run publish:linux:deb:armv7l
-          npm run publish:linux:appImage
-          npm run publish:linux:rpm
-          npm run publish:linux:pacman
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BT_TOKEN: ${{ secrets.BT_TOKEN }}
+          npm run pack:linux:deb:amd64
+          npm run pack:linux:deb:arm64
+          npm run pack:linux:deb:armv7l
+          npm run pack:linux:appImage
+          npm run pack:linux:rpm
+          npm run pack:linux:pacman
 
       - name: Generate file MD5
         run: |
           cd build
           md5sum *.deb *.rpm *.pacman *.AppImage
+
+      - name: Upload Linux packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: lx-music-desktop-linux
+          path: |
+            build/*.deb
+            build/*.rpm
+            build/*.pacman
+            build/*.AppImage
+          if-no-files-found: error
+
+  Release:
+    name: Publish GitHub Release
+    needs: [Windows, Windows_7, Mac, Linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out git repository
+        uses: actions/checkout@v6
+
+      - name: Download packages
+        uses: actions/download-artifact@v8
+        with:
+          pattern: lx-music-desktop-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="v$(node -p "require('./package.json').version")"
+          shopt -s nullglob
+          packages=(release-assets/*)
+          if [[ ${#packages[@]} -ne 15 ]]; then
+            echo "Expected 15 packages, found ${#packages[@]}"
+            exit 1
+          fi
+          for package in "${packages[@]}"; do
+            test -s "$package"
+          done
+          (cd release-assets && sha256sum * > SHA256SUMS.txt)
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" release-assets/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$tag" release-assets/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "LX Music $tag" --generate-notes
+          fi
+          asset_count=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets | length')
+          test "$asset_count" -eq 16
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json url --jq '.url' >> "$GITHUB_STEP_SUMMARY"
