@@ -26,6 +26,8 @@ declare namespace LX {
     interface Config {
       stopQuality: StopQuality
       cd2RootPath: string
+      cd2LocalMountPath: string
+      cd2ApiMountPoint: string
       cd2GrpcUrl: string
       cd2ApiToken: string
       syncToCd2: boolean
@@ -51,6 +53,8 @@ declare namespace LX {
     interface ConfigUpdate {
       stopQuality?: StopQuality
       cd2RootPath?: string
+      cd2LocalMountPath?: string
+      cd2ApiMountPoint?: string
       cd2GrpcUrl?: string
       cd2ApiToken?: string
       syncToCd2?: boolean
@@ -227,6 +231,7 @@ declare namespace LX {
     interface Cd2Health {
       rootPath: string
       mountPath: string
+      apiMountPoint: string
       sourceDir: string
       writable: boolean
     }

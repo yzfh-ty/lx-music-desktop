@@ -33,6 +33,12 @@ const pathsOverlap = (first: string, second: string) => {
   return a == b || a.startsWith(`${b}${path.sep}`) || b.startsWith(`${a}${path.sep}`)
 }
 
+const pathIsWithin = (parent: string, child: string) => {
+  const parentPath = comparablePath(parent)
+  const childPath = comparablePath(child)
+  return childPath == parentPath || childPath.startsWith(`${parentPath}${path.sep}`)
+}
+
 let calibrationExecutionRunning = false
 const executeSubscriptionCalibration = async(
   config: LX.Subscription.Config,
@@ -78,8 +84,17 @@ export default () => {
     const next = { ...current, ...params }
     const downloadPath = getLocalDownloadDir()
     const cd2RootPath = next.cd2RootPath.trim() ? path.resolve(next.cd2RootPath) : ''
-    if (cd2RootPath && pathsOverlap(downloadPath, cd2RootPath)) {
-      throw new Error('LX Music 下载目录不能位于 CloudDrive2 音乐库内或包含 CloudDrive2 音乐库，请先修改原版下载目录')
+    const cd2LocalMountPath = next.cd2LocalMountPath.trim() ? path.resolve(next.cd2LocalMountPath) : ''
+    const cd2ApiMountPoint = next.cd2ApiMountPoint.trim()
+    if (!!cd2LocalMountPath != !!cd2ApiMountPoint) {
+      throw new Error('Docker 路径映射需要同时设置本机挂载根目录和 CloudDrive2 API 挂载点')
+    }
+    if (cd2RootPath && cd2LocalMountPath && !pathIsWithin(cd2LocalMountPath, cd2RootPath)) {
+      throw new Error('CloudDrive2 音乐库根目录必须位于本机挂载根目录内')
+    }
+    const cd2LocalBoundary = cd2LocalMountPath || cd2RootPath
+    if (cd2LocalBoundary && pathsOverlap(downloadPath, cd2LocalBoundary)) {
+      throw new Error('LX Music 下载目录不能位于 CloudDrive2 本机挂载目录内或包含该目录，请先修改原版下载目录')
     }
     return global.lx.worker.dbService.updateSubscriptionConfig(params)
   })

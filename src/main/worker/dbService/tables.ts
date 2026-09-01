@@ -249,6 +249,8 @@ tables.set('subscription_config', `
     "id" INTEGER NOT NULL DEFAULT 1,
     "stop_quality" TEXT NOT NULL DEFAULT 'flac',
     "cd2_root_path" TEXT NOT NULL DEFAULT '',
+    "cd2_local_mount_path" TEXT NOT NULL DEFAULT '',
+    "cd2_api_mount_point" TEXT NOT NULL DEFAULT '',
     "cd2_grpc_url" TEXT NOT NULL DEFAULT '',
     "cd2_api_token" TEXT NOT NULL DEFAULT '',
     "sync_to_cd2" INTEGER NOT NULL DEFAULT 1,
@@ -473,4 +475,4 @@ tables.set('index_subscription_structure_issue_kind', `
 
 export default tables
 
-export const DB_VERSION = '12'
+export const DB_VERSION = '13'

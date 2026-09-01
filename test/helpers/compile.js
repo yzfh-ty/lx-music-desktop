@@ -13,6 +13,7 @@ const stampPath = path.join(buildDir, '.stamp.json')
 const ENTRIES = [
   'src/main/modules/subscription/cd2.ts',
   'src/main/worker/dbService/tables.ts',
+  'src/main/worker/dbService/migrate.ts',
   'src/main/worker/dbService/modules/subscription/index.ts',
   'src/renderer/store/subscription/index.ts',
 ]
@@ -20,6 +21,7 @@ const ENTRIES = [
 const OUTPUTS = [
   'main/modules/subscription/cd2.js',
   'main/worker/dbService/tables.js',
+  'main/worker/dbService/migrate.js',
   'main/worker/dbService/modules/subscription/index.js',
   'renderer/store/subscription/index.js',
 ]

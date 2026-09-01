@@ -27,6 +27,8 @@ interface SubscriptionRow {
 interface ConfigRow {
   stop_quality: LX.Subscription.StopQuality
   cd2_root_path: string
+  cd2_local_mount_path: string
+  cd2_api_mount_point: string
   cd2_grpc_url: string
   cd2_api_token: string
   sync_to_cd2: number
@@ -147,6 +149,8 @@ const toSubscription = (row: SubscriptionRow): LX.Subscription.ListItem => ({
 const toConfig = (row: ConfigRow): LX.Subscription.Config => ({
   stopQuality: row.stop_quality,
   cd2RootPath: row.cd2_root_path,
+  cd2LocalMountPath: row.cd2_local_mount_path,
+  cd2ApiMountPoint: row.cd2_api_mount_point,
   cd2GrpcUrl: row.cd2_grpc_url,
   cd2ApiToken: row.cd2_api_token,
   syncToCd2: row.sync_to_cd2 == 1,
@@ -263,6 +267,8 @@ export const updateSubscriptionConfig = (input: LX.Subscription.ConfigUpdate): L
       UPDATE subscription_config SET
       stop_quality = @stopQuality,
       cd2_root_path = @cd2RootPath,
+      cd2_local_mount_path = @cd2LocalMountPath,
+      cd2_api_mount_point = @cd2ApiMountPoint,
       cd2_grpc_url = @cd2GrpcUrl,
       cd2_api_token = @cd2ApiToken,
       sync_to_cd2 = @syncToCd2,

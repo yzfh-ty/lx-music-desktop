@@ -28,6 +28,8 @@ const makeWorkspace = () => {
 const makeConfig = (overrides = {}) => ({
   stopQuality: 'flac',
   cd2RootPath: '',
+  cd2LocalMountPath: '',
+  cd2ApiMountPoint: '',
   cd2GrpcUrl: '',
   cd2ApiToken: 'mock-token',
   syncToCd2: true,

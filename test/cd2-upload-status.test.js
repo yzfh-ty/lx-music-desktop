@@ -94,6 +94,57 @@ test('手动下载“上传并保留”走真实复制与 gRPC 确认链路，�
   assert.equal(fs.existsSync(copied.cloudPath.replace(/\.flac$/i, '.lrc')), true)
 })
 
+test('Docker 内外挂载路径不同时按显式映射复制并生成正确的远端路径', async(t) => {
+  const server = await new MockCd2Server().start()
+  const ws = makeWorkspace()
+  t.after(async() => { await server.stop(); ws.cleanup() })
+  const localMountPath = ws.mount
+  const libraryRoot = path.join(localMountPath, 'music')
+  const apiMountPoint = '/container/CloudNAS'
+  fs.mkdirSync(libraryRoot, { recursive: true })
+  server.mountPoints = [{
+    mountPoint: apiMountPoint,
+    sourceDir: '/115',
+    readOnly: false,
+    isMounted: true,
+    failReason: '',
+  }]
+  const localPath = ws.writeFile(ws.download, FILE_NAME, FILE_SIZE)
+  const config = makeConfig({
+    cd2RootPath: libraryRoot,
+    cd2LocalMountPath: localMountPath,
+    cd2ApiMountPoint: apiMountPoint,
+    cd2GrpcUrl: server.url,
+  })
+
+  const health = await cd2.checkSubscriptionCd2Health(config)
+  assert.equal(health.rootPath, libraryRoot)
+  assert.equal(health.mountPath, localMountPath)
+  assert.equal(health.apiMountPoint, apiMountPoint)
+
+  const copied = await cd2.copySubscriptionFileToCd2({ config, localPath, currentCloudPath: null })
+  assert.equal(copied.cloudPath, path.join(libraryRoot, FILE_NAME))
+  assert.equal(copied.expectedDestPath, `/115/music/${FILE_NAME}`)
+  assert.equal(fs.existsSync(copied.cloudPath), true)
+})
+
+test('Docker 路径映射缺少任一端时拒绝健康检查', async(t) => {
+  const c = await setup()
+  t.after(() => c.teardown())
+  c.config.cd2LocalMountPath = c.ws.mount
+
+  await assert.rejects(cd2.checkSubscriptionCd2Health(c.config), /需要同时设置/)
+})
+
+test('Docker 路径映射要求音乐库位于本机挂载根目录内', async(t) => {
+  const c = await setup()
+  t.after(() => c.teardown())
+  c.config.cd2LocalMountPath = c.ws.download
+  c.config.cd2ApiMountPoint = c.server.mountPoints[0].mountPoint
+
+  await assert.rejects(cd2.checkSubscriptionCd2Health(c.config), /必须位于本机挂载根目录内/)
+})
+
 test('手动下载“上传后清理”只在云端确认后删除本地音频和歌词', async(t) => {
   const c = await setup({ copiedToMount: false })
   t.after(() => c.teardown())

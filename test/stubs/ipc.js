@@ -19,6 +19,8 @@ const state = {
   config: {
     stopQuality: 'flac',
     cd2RootPath: 'F:\\',
+    cd2LocalMountPath: '',
+    cd2ApiMountPoint: '',
     cd2GrpcUrl: 'http://127.0.0.1:19798',
     cd2ApiToken: 'token',
     syncToCd2: true,
@@ -192,7 +194,7 @@ const getSubscriptionCalibrationRun = async() => null
 const getSubscriptionStructureValidationRecords = async() => []
 const getSubscriptionHistory = async() => []
 const getSubscriptionDiskInfo = async() => ({ ...state.diskInfo })
-const checkSubscriptionCd2Health = async() => ({ rootPath: 'F:\\', mountPath: 'F:\\', sourceDir: '/115/music', writable: true })
+const checkSubscriptionCd2Health = async() => ({ rootPath: 'F:\\', mountPath: 'F:\\', apiMountPoint: 'F:\\', sourceDir: '/115/music', writable: true })
 const unsupported = name => async() => { throw new Error(`测试桩未实现：${name}`) }
 
 module.exports = {

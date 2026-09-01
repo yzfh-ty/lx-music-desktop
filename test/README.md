@@ -15,7 +15,8 @@ node --test test/cd2-upload-status.test.js  # 跑单个
 
 | 文件 | 覆盖范围 |
 | --- | --- |
-| `cd2-upload-status.test.js` | `getSubscriptionCd2UploadStatus` 的全部分支：destPath 关联、`size=0` 预处理、传输任务被 CloudDrive2 清出列表后的云端兜底、`Skipped`/`Error` 等终态、多任务冲突、权限降级；另用真实复制、gRPC 确认与清理模块覆盖手动下载的“上传并保留 / 上传后清理”链路 |
+| `cd2-upload-status.test.js` | `getSubscriptionCd2UploadStatus` 的全部分支：Docker 容器内外路径映射、destPath 关联、`size=0` 预处理、传输任务被 CloudDrive2 清出列表后的云端兜底、`Skipped`/`Error` 等终态、多任务冲突、权限降级；另用真实复制、gRPC 确认与清理模块覆盖手动下载的“上传并保留 / 上传后清理”链路 |
+| `db-migration.test.js` | 真实执行旧数据库迁移，确认升级后补齐 Docker 路径映射字段且不丢失已有 CloudDrive2 配置 |
 | `cleanup-safety.test.js` | `cleanupSubscriptionLocalFile` 和 `removeSubscriptionOldCloudFile` 的安全门——这是整条链路里唯一会删用户文件的地方，任何不确定的情况都必须拒绝删除 |
 | `task-state-machine.test.js` | `processSubscriptionMaintenance` / `recheckSubscriptionUpload` 的状态转换、写库抑制，以及活动下载磁盘锁、本地模式自动备份、异步初始化取消 |
 | `db-status-enums.test.js` | 数据库层对 `upload_unconfirmed` 的处理：重试入口、看板计数、重新入队拦截、歌单同步、云端校准保护；另覆盖手动上传去重记录的新增与升级 |

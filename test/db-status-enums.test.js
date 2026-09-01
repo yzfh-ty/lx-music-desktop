@@ -78,6 +78,17 @@ test('真实 schema 能建起来，且 status 列没有 CHECK 约束（新增状
   assert.equal(/CHECK/i.test(sql), false)
 })
 
+test('Docker 路径映射配置可以完整写入并读回', () => {
+  const updated = sub.updateSubscriptionConfig({
+    cd2RootPath: '/home/yzfh/CloudNAS/music',
+    cd2LocalMountPath: '/home/yzfh/CloudNAS',
+    cd2ApiMountPoint: '/container/CloudNAS',
+  })
+  assert.equal(updated.cd2RootPath, '/home/yzfh/CloudNAS/music')
+  assert.equal(updated.cd2LocalMountPath, '/home/yzfh/CloudNAS')
+  assert.equal(updated.cd2ApiMountPoint, '/container/CloudNAS')
+})
+
 test('手动下载上传确认后会写入并更新音乐库去重记录', () => {
   const musicInfo = {
     id: 'manual-1', source: 'wy', name: '手动歌曲', singer: '歌手', interval: '03:30',

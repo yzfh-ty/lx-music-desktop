@@ -17,6 +17,15 @@ dd.gap-top(:aria-label="$t('setting__subscription_config')")
       div
         base-input(v-model="form.cd2RootPath" :class="$style.wide" :placeholder="$t('subscription__setting_cd2_root_placeholder')")
     .p
+      | {{ $t('subscription__setting_cd2_mount_root') }}
+      div
+        base-input(v-model="form.cd2LocalMountPath" :class="$style.wide" :placeholder="$t('subscription__setting_cd2_mount_root_placeholder')")
+    .p
+      | {{ $t('subscription__setting_cd2_api_mount') }}
+      div
+        base-input(v-model="form.cd2ApiMountPoint" :class="$style.wide" :placeholder="$t('subscription__setting_cd2_api_mount_placeholder')")
+    .p.small.tip {{ $t('subscription__setting_cd2_mapping_tip') }}
+    .p
       | {{ $t('subscription__setting_cd2_url') }}
       div
         base-input(v-model="form.cd2GrpcUrl" :class="$style.wide" :placeholder="$t('subscription__setting_cd2_url_placeholder')")
@@ -164,6 +173,8 @@ const structureMessage = ref('')
 const form = reactive({
   stopQuality: 'flac' as LX.Subscription.StopQuality,
   cd2RootPath: '',
+  cd2LocalMountPath: '',
+  cd2ApiMountPoint: '',
   cd2GrpcUrl: '',
   cd2ApiToken: '',
   syncToCd2: true,
@@ -189,6 +200,8 @@ watch(() => state.config, config => {
   if (!config || formInited) return
   form.stopQuality = config.stopQuality
   form.cd2RootPath = config.cd2RootPath
+  form.cd2LocalMountPath = config.cd2LocalMountPath
+  form.cd2ApiMountPoint = config.cd2ApiMountPoint
   form.cd2GrpcUrl = config.cd2GrpcUrl
   form.cd2ApiToken = config.cd2ApiToken
   form.syncToCd2 = config.syncToCd2
@@ -233,6 +246,10 @@ const run = async<T>(msg: Ref<string>, action: () => Promise<T>, success: string
 }
 
 const handleSave = () => {
+  if (!!form.cd2LocalMountPath.trim() != !!form.cd2ApiMountPoint.trim()) {
+    message.value = t('subscription__setting_cd2_mapping_invalid')
+    return
+  }
   const threshold = Number(form.diskThresholdGb)
   if (!Number.isFinite(threshold) || threshold <= 0) {
     message.value = t('subscription__setting_threshold_invalid')
@@ -242,6 +259,8 @@ const handleSave = () => {
     await saveSubscriptionConfig({
       stopQuality: form.stopQuality,
       cd2RootPath: form.cd2RootPath,
+      cd2LocalMountPath: form.cd2LocalMountPath,
+      cd2ApiMountPoint: form.cd2ApiMountPoint,
       cd2GrpcUrl: form.cd2GrpcUrl,
       cd2ApiToken: form.cd2ApiToken,
       syncToCd2: form.syncToCd2,

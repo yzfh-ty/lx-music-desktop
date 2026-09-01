@@ -84,7 +84,10 @@ interface Cd2Client extends grpc.Client {
 
 interface MountedRoot {
   mount: MountPoint
+  /** LX Music 当前进程可访问的本机挂载根目录 */
   mountPath: string
+  /** CloudDrive2 服务端（可能位于 Docker 内）返回的挂载点 */
+  apiMountPoint: string
   rootPath: string
 }
 
@@ -140,6 +143,11 @@ const normalizeMountPath = (input: string) => {
   return path.resolve(/^[a-z]:$/i.test(value) ? `${value}${path.sep}` : value)
 }
 
+const comparableApiMountPoint = (input: string) => {
+  const normalized = input.trim().replace(/\\/g, '/').replace(/\/{2,}/g, '/').replace(/\/$/, '') || '/'
+  return /^[a-z]:\//i.test(normalized) ? normalized.toLowerCase() : normalized
+}
+
 const comparablePath = (input: string) => {
   const resolved = path.resolve(input).replace(/[\\/]+$/, '')
   return process.platform == 'win32' ? resolved.toLowerCase() : resolved
@@ -151,19 +159,54 @@ const isWithin = (parent: string, child: string) => {
   return childPath == parentPath || childPath.startsWith(`${parentPath}${path.sep}`)
 }
 
-const findMountedRoot = (rootPath: string, mountPoints: MountPoint[]): MountedRoot => {
+const assertUsableMount = (mount: MountPoint) => {
+  if (mount.readOnly) throw new Error('CloudDrive2 音乐库所在挂载点是只读的')
+  if (!mount.isMounted) throw new Error(`CloudDrive2 挂载点未就绪：${mount.failReason || mount.mountPoint}`)
+}
+
+const findMountedRoot = (
+  rootPath: string,
+  mountPoints: MountPoint[],
+  localMountPath = '',
+  apiMountPoint = '',
+): MountedRoot => {
   const resolvedRoot = path.resolve(rootPath)
+  const hasLocalMapping = !!localMountPath.trim()
+  const hasApiMapping = !!apiMountPoint.trim()
+  if (hasLocalMapping != hasApiMapping) {
+    throw new Error('Docker 路径映射需要同时设置本机挂载根目录和 CloudDrive2 API 挂载点')
+  }
+  if (hasLocalMapping) {
+    const resolvedLocalMount = normalizeMountPath(localMountPath)
+    if (!isWithin(resolvedLocalMount, resolvedRoot)) {
+      throw new Error('CloudDrive2 音乐库根目录必须位于本机挂载根目录内')
+    }
+    const expectedApiMount = comparableApiMountPoint(apiMountPoint)
+    const mount = mountPoints.find(item => item.mountPoint && comparableApiMountPoint(item.mountPoint) == expectedApiMount)
+    if (!mount) throw new Error(`CloudDrive2 API 未返回配置的挂载点：${apiMountPoint.trim()}`)
+    assertUsableMount(mount)
+    return {
+      mount,
+      mountPath: resolvedLocalMount,
+      apiMountPoint: mount.mountPoint,
+      rootPath: resolvedRoot,
+    }
+  }
   const matches = mountPoints
     .filter(mount => mount.isMounted && !mount.readOnly && mount.mountPoint && isWithin(normalizeMountPath(mount.mountPoint), resolvedRoot))
     .sort((a, b) => normalizeMountPath(b.mountPoint).length - normalizeMountPath(a.mountPoint).length)
   const mount = matches[0]
   if (!mount) {
     const failed = mountPoints.find(item => item.mountPoint && isWithin(normalizeMountPath(item.mountPoint), resolvedRoot))
-    if (failed?.readOnly) throw new Error('CloudDrive2 音乐库所在挂载点是只读的')
-    if (failed && !failed.isMounted) throw new Error(`CloudDrive2 挂载点未就绪：${failed.failReason || failed.mountPoint}`)
+    if (failed) assertUsableMount(failed)
     throw new Error('CloudDrive2 音乐库根目录不属于已挂载且可写的 CloudDrive2 挂载点')
   }
-  return { mount, mountPath: normalizeMountPath(mount.mountPoint), rootPath: resolvedRoot }
+  return {
+    mount,
+    mountPath: normalizeMountPath(mount.mountPoint),
+    apiMountPoint: mount.mountPoint,
+    rootPath: resolvedRoot,
+  }
 }
 
 const checkConnection = async(config: LX.Subscription.Config) => {
@@ -184,7 +227,12 @@ const checkConnection = async(config: LX.Subscription.Config) => {
     if (token.permissions?.allow_get_transfer_tasks === false) throw new Error('CloudDrive2 API Token 缺少读取上传任务权限')
     const metadata = metadataFor(config.cd2ApiToken.trim())
     const result = await call<{ mountPoints: MountPoint[] }>(callback => client.getMountPoints({}, metadata, options, callback))
-    const mountedRoot = findMountedRoot(config.cd2RootPath, result.mountPoints)
+    const mountedRoot = findMountedRoot(
+      config.cd2RootPath,
+      result.mountPoints,
+      config.cd2LocalMountPath,
+      config.cd2ApiMountPoint,
+    )
     const rootStat = await fs.promises.stat(mountedRoot.rootPath).catch(() => null)
     if (!rootStat?.isDirectory()) throw new Error('CloudDrive2 音乐库根目录不存在或不是目录')
     await fs.promises.access(mountedRoot.rootPath, fs.constants.R_OK | fs.constants.W_OK)
@@ -239,6 +287,7 @@ export const checkSubscriptionCd2Health = async(config: LX.Subscription.Config):
     return {
       rootPath: connection.mountedRoot.rootPath,
       mountPath: connection.mountedRoot.mountPath,
+      apiMountPoint: connection.mountedRoot.apiMountPoint,
       sourceDir: connection.mountedRoot.mount.sourceDir,
       writable: true,
     }
